@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vinyl Ripper</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+      padding: 40px;
+    }
+
+    h1 {
+      color: #333;
+      margin-bottom: 10px;
+      font-size: 2.5em;
+    }
+
+    .subtitle {
+      color: #666;
+      margin-bottom: 30px;
+      font-size: 1.1em;
+    }
+
+    .form-group {
+      margin-bottom: 25px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 8px;
+      color: #444;
+      font-weight: 600;
+    }
+
+    input[type="text"] {
+      width: 100%;
+      padding: 12px;
+      border: 2px solid #ddd;
+      border-radius: 6px;
+      font-size: 16px;
+      transition: border-color 0.3s;
+    }
+
+    input[type="text"]:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+
+    .file-upload {
+      margin-bottom: 15px;
+    }
+
+    .file-upload label {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+      padding: 12px;
+      border: 2px dashed #ddd;
+      border-radius: 6px;
+      transition: all 0.3s;
+    }
+
+    .file-upload label:hover {
+      border-color: #667eea;
+      background: #f8f9ff;
+    }
+
+    .file-upload input[type="file"] {
+      display: none;
+    }
+
+    .file-name {
+      color: #666;
+      font-size: 0.9em;
+      margin-top: 5px;
+    }
+
+    .file-selected {
+      color: #667eea;
+      font-weight: 600;
+    }
+
+    button {
+      width: 100%;
+      padding: 15px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 18px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    button:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+    }
+
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .status {
+      margin-top: 30px;
+      padding: 20px;
+      border-radius: 6px;
+      display: none;
+    }
+
+    .status.show {
+      display: block;
+    }
+
+    .status.processing {
+      background: #fff3cd;
+      border-left: 4px solid #ffc107;
+    }
+
+    .status.success {
+      background: #d4edda;
+      border-left: 4px solid #28a745;
+    }
+
+    .status.error {
+      background: #f8d7da;
+      border-left: 4px solid #dc3545;
+    }
+
+    .status h3 {
+      margin-bottom: 10px;
+      color: #333;
+    }
+
+    .progress-bar {
+      width: 100%;
+      height: 6px;
+      background: #e0e0e0;
+      border-radius: 3px;
+      overflow: hidden;
+      margin: 15px 0;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+      width: 0%;
+      transition: width 0.3s;
+      animation: progress-animation 1.5s ease-in-out infinite;
+    }
+
+    @keyframes progress-animation {
+      0% { opacity: 1; }
+      50% { opacity: 0.6; }
+      100% { opacity: 1; }
+    }
+
+    .track-list {
+      margin-top: 15px;
+    }
+
+    .track-item {
+      padding: 10px;
+      background: #f8f9fa;
+      border-radius: 4px;
+      margin-bottom: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .track-title {
+      font-weight: 600;
+      color: #333;
+    }
+
+    .track-meta {
+      color: #666;
+      font-size: 0.9em;
+    }
+
+    .confidence {
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 0.85em;
+      font-weight: 600;
+    }
+
+    .confidence.high {
+      background: #d4edda;
+      color: #155724;
+    }
+
+    .confidence.medium {
+      background: #fff3cd;
+      color: #856404;
+    }
+
+    .confidence.low {
+      background: #f8d7da;
+      color: #721c24;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🎵 Vinyl Ripper</h1>
+    <p class="subtitle">Convert your vinyl album recordings into individual tracks</p>
+
+    <form id="ripForm">
+      <div class="form-group">
+        <label for="artist">Artist / Band Name *</label>
+        <input type="text" id="artist" name="artist" required placeholder="e.g., The Beatles">
+      </div>
+
+      <div class="form-group">
+        <label for="album">Album Title *</label>
+        <input type="text" id="album" name="album" required placeholder="e.g., Abbey Road">
+      </div>
+
+      <div class="form-group">
+        <label>Album Sides (Upload 2-4 MP3 files)</label>
+
+        <div class="file-upload">
+          <label for="sideA">
+            <span>📀 Side A *</span>
+          </label>
+          <input type="file" id="sideA" name="sideA" accept="audio/mpeg,audio/mp3" required>
+          <div class="file-name" id="sideA-name">No file selected</div>
+        </div>
+
+        <div class="file-upload">
+          <label for="sideB">
+            <span>📀 Side B *</span>
+          </label>
+          <input type="file" id="sideB" name="sideB" accept="audio/mpeg,audio/mp3" required>
+          <div class="file-name" id="sideB-name">No file selected</div>
+        </div>
+
+        <div class="file-upload">
+          <label for="sideC">
+            <span>📀 Side C (optional)</span>
+          </label>
+          <input type="file" id="sideC" name="sideC" accept="audio/mpeg,audio/mp3">
+          <div class="file-name" id="sideC-name">No file selected</div>
+        </div>
+
+        <div class="file-upload">
+          <label for="sideD">
+            <span>📀 Side D (optional)</span>
+          </label>
+          <input type="file" id="sideD" name="sideD" accept="audio/mpeg,audio/mp3">
+          <div class="file-name" id="sideD-name">No file selected</div>
+        </div>
+      </div>
+
+      <button type="submit" id="submitBtn">Start Ripping</button>
+    </form>
+
+    <div class="status" id="status">
+      <h3 id="statusTitle">Processing...</h3>
+      <p id="statusMessage"></p>
+      <div class="progress-bar" id="progressBar" style="display: none;">
+        <div class="progress-fill"></div>
+      </div>
+      <div class="track-list" id="trackList"></div>
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById('ripForm');
+    const status = document.getElementById('status');
+    const statusTitle = document.getElementById('statusTitle');
+    const statusMessage = document.getElementById('statusMessage');
+    const progressBar = document.getElementById('progressBar');
+    const trackList = document.getElementById('trackList');
+    const submitBtn = document.getElementById('submitBtn');
+
+    // Handle file input display
+    ['sideA', 'sideB', 'sideC', 'sideD'].forEach(sideId => {
+      const input = document.getElementById(sideId);
+      const display = document.getElementById(`${sideId}-name`);
+
+      input.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) {
+          display.textContent = e.target.files[0].name;
+          display.classList.add('file-selected');
+        } else {
+          display.textContent = 'No file selected';
+          display.classList.remove('file-selected');
+        }
+      });
+    });
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const formData = new FormData(form);
+
+      // Show processing status
+      status.className = 'status show processing';
+      statusTitle.textContent = 'Processing...';
+      statusMessage.textContent = 'Uploading files and analyzing audio. This may take several minutes.';
+      progressBar.style.display = 'block';
+      trackList.innerHTML = '';
+      submitBtn.disabled = true;
+
+      try {
+        const response = await fetch('/api/rip', {
+          method: 'POST',
+          body: formData
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+          status.className = 'status show success';
+          statusTitle.textContent = '✓ Success!';
+          statusMessage.textContent = `Album ripped successfully! Tracks saved to: ${result.outputDir}`;
+          progressBar.style.display = 'none';
+
+          // Display track list
+          if (result.tracks && result.tracks.length > 0) {
+            trackList.innerHTML = '<h4 style="margin-bottom: 10px;">Tracks:</h4>';
+            result.tracks.forEach(track => {
+              const confidenceClass = track.confidence > 0.8 ? 'high' : track.confidence > 0.5 ? 'medium' : 'low';
+              const confidenceLabel = track.matched ? `${Math.round(track.confidence * 100)}%` : 'No match';
+
+              trackList.innerHTML += `
+                <div class="track-item">
+                  <div>
+                    <div class="track-title">${track.trackNumber}. ${track.title}</div>
+                    <div class="track-meta">${Math.round(track.duration)}s - ${track.fileName}</div>
+                  </div>
+                  <span class="confidence ${confidenceClass}">${confidenceLabel}</span>
+                </div>
+              `;
+            });
+          }
+        } else {
+          throw new Error(result.error || 'Unknown error occurred');
+        }
+      } catch (error) {
+        status.className = 'status show error';
+        statusTitle.textContent = '✗ Error';
+        statusMessage.textContent = `Failed to rip album: ${error.message}`;
+        progressBar.style.display = 'none';
+        trackList.innerHTML = '';
+      } finally {
+        submitBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
