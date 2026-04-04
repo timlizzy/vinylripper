@@ -47,6 +47,13 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
+// Config endpoint - returns defaults for the UI
+app.get('/api/config', (req, res) => {
+  res.json({
+    outputDir: path.resolve(config.outputDir)
+  });
+});
+
 // Main ripping endpoint
 app.post('/api/rip', upload.fields([
   { name: 'sideA', maxCount: 1 },
@@ -57,7 +64,7 @@ app.post('/api/rip', upload.fields([
   const startTime = Date.now();
 
   try {
-    const { artist, album } = req.body;
+    const { artist, album, outputDir: requestedOutputDir } = req.body;
 
     if (!artist || !album) {
       return res.status(400).json({
@@ -90,8 +97,24 @@ app.post('/api/rip', upload.fields([
       }
     }
 
+    // Resolve output directory: use request value if provided, otherwise config default
+    const outputDir = requestedOutputDir && requestedOutputDir.trim()
+      ? path.resolve(requestedOutputDir.trim())
+      : path.resolve(config.outputDir);
+
+    // Basic path safety: ensure it doesn't contain parent traversal
+    const resolvedOutput = path.resolve(outputDir);
+    if (resolvedOutput.includes('..')) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid output directory path'
+      });
+    }
+
+    logger.info({ outputDir: resolvedOutput }, 'Using output directory');
+
     // Process the vinyl rip
-    const result = await ripVinylAlbum(sides, artist, album);
+    const result = await ripVinylAlbum(sides, artist, album, resolvedOutput);
 
     // Clean up uploaded files
     for (const side of sides) {

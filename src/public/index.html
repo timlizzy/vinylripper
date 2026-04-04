@@ -370,6 +370,12 @@
       </div>
 
       <div class="form-group">
+        <label for="outputDir">📂 Output Folder</label>
+        <input type="text" id="outputDir" name="outputDir" placeholder="Loading default...">
+        <div style="font-size: 0.8em; color: #888; margin-top: 4px;">Album subfolder will be created automatically inside this directory</div>
+      </div>
+
+      <div class="form-group">
         <label>Album Sides (Upload 2-4 MP3 files)</label>
 
         <div class="file-upload">
@@ -443,6 +449,22 @@
       const isCollapsed = logBody.classList.toggle('collapsed');
       logToggleLabel.textContent = isCollapsed ? '▼ Show' : '▲ Hide';
     });
+
+    // Load default output directory from server config
+    (async function loadConfig() {
+      try {
+        const resp = await fetch('/api/config');
+        const cfg = await resp.json();
+        const outputDirInput = document.getElementById('outputDir');
+        if (cfg.outputDir && !outputDirInput.value.trim()) {
+          outputDirInput.value = cfg.outputDir;
+          outputDirInput.placeholder = cfg.outputDir;
+        }
+      } catch (e) {
+        // silently fall back to placeholder
+        document.getElementById('outputDir').placeholder = 'output';
+      }
+    })();
 
     // Parse artist and album from filename like "Artist - Album - Side A.mp3"
     function parseFilename(filename) {

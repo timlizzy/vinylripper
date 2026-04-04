@@ -5,6 +5,11 @@ export default {
   // Server configuration
   port: 3000,
 
+  // Output directory for ripped albums (relative or absolute path)
+  // An album subfolder (<Artist> - <Album>) is created inside this directory
+  // Can also be changed per-rip in the web UI
+  outputDir: 'output',
+
   // Audio processing settings
   audio: {
     // Silence detection threshold in dB

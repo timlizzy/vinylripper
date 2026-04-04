@@ -15,7 +15,7 @@ import logger from './logger.js';
  * 3. Match detected tracks against official track listing
  * 4. Rename and save output files
  */
-export async function ripVinylAlbum(sides, artist, album) {
+export async function ripVinylAlbum(sides, artist, album, baseOutputDir = 'output') {
   const startTime = Date.now();
   logger.info({ artist, album, sideCount: sides.length }, 'Starting vinyl rip process');
 
@@ -103,7 +103,7 @@ export async function ripVinylAlbum(sides, artist, album) {
     }
 
     // ─── STEP 2: Process each side with expected track info ──────────
-    const tempDir = path.join('output', 'temp', `${Date.now()}`);
+    const tempDir = path.join(baseOutputDir, 'temp', `${Date.now()}`);
     await fs.mkdir(tempDir, { recursive: true });
 
     const sideResults = [];
@@ -291,7 +291,7 @@ export async function ripVinylAlbum(sides, artist, album) {
     // ─── STEP 4: Save output files ──────────────────────────────────
     const sanitizedArtist = artist.replace(/[<>:"/\\|?*]/g, '_');
     const sanitizedAlbum = album.replace(/[<>:"/\\|?*]/g, '_');
-    const outputDir = path.join('output', `${sanitizedArtist} - ${sanitizedAlbum}`);
+    const outputDir = path.join(baseOutputDir, `${sanitizedArtist} - ${sanitizedAlbum}`);
     await fs.mkdir(outputDir, { recursive: true });
 
     const results = [];

@@ -1,6 +1,9 @@
 export default {
   port: 3000,
 
+  // Output directory for ripped albums (can be relative or absolute path)
+  outputDir: 'output',
+
   // Audio processing settings
   audio: {
     // Progressive silence detection - tries each level until enough silences are found
