@@ -123,7 +123,8 @@ app.post('/api/rip', upload.fields([
 
     res.status(500).json({
       success: false,
-      error: error.message
+      error: error.message,
+      processingLog: error.processingLog || []
     });
   }
 });

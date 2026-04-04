@@ -3,10 +3,13 @@ export default {
 
   // Audio processing settings
   audio: {
-    // Silence detection threshold in dB (lower = more sensitive)
-    silenceThreshold: -40,
-    // Minimum silence duration to consider as track break (seconds)
-    minSilenceDuration: 1.5,
+    // Progressive silence detection - tries each level until enough silences are found
+    silenceDetection: [
+      { threshold: -40, duration: 1.5, label: 'strict' },
+      { threshold: -35, duration: 1.0, label: 'moderate' },
+      { threshold: -30, duration: 0.5, label: 'lenient' },
+      { threshold: -25, duration: 0.3, label: 'very lenient' }
+    ],
     // Minimum track length (seconds)
     minTrackLength: 30,
     // For live albums: look for relative quiet sections (percentile-based)
@@ -14,7 +17,9 @@ export default {
       // Use relative loudness detection
       enabled: true,
       // Consider sections quieter than this percentile as potential breaks
-      quietPercentile: 20
+      quietPercentile: 15,
+      // Minimum quiet section duration (seconds)
+      minQuietDuration: 0.3
     }
   },
 

@@ -221,6 +221,104 @@
       background: #f8d7da;
       color: #721c24;
     }
+
+    /* Processing Log Styles */
+    .processing-log {
+      margin-top: 20px;
+      border: 1px solid #e0e0e0;
+      border-radius: 6px;
+      overflow: hidden;
+    }
+
+    .processing-log-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 16px;
+      background: #f8f9fa;
+      border-bottom: 1px solid #e0e0e0;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .processing-log-header:hover {
+      background: #e9ecef;
+    }
+
+    .processing-log-header h4 {
+      margin: 0;
+      color: #444;
+      font-size: 0.95em;
+    }
+
+    .processing-log-toggle {
+      font-size: 0.85em;
+      color: #666;
+    }
+
+    .processing-log-body {
+      max-height: 400px;
+      overflow-y: auto;
+      padding: 0;
+      font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+      font-size: 0.82em;
+      line-height: 1.6;
+      background: #1e1e2e;
+      color: #cdd6f4;
+    }
+
+    .processing-log-body.collapsed {
+      display: none;
+    }
+
+    .log-entry {
+      padding: 2px 14px;
+      border-left: 3px solid transparent;
+    }
+
+    .log-entry.log-heading {
+      padding: 8px 14px 4px 14px;
+      margin-top: 6px;
+      font-weight: 700;
+      font-size: 0.95em;
+      color: #cba6f7;
+      border-left-color: transparent;
+      background: rgba(203, 166, 247, 0.08);
+    }
+
+    .log-entry.log-info {
+      color: #89b4fa;
+      border-left-color: #89b4fa;
+    }
+
+    .log-entry.log-success {
+      color: #a6e3a1;
+      border-left-color: #a6e3a1;
+    }
+
+    .log-entry.log-warning {
+      color: #f9e2af;
+      border-left-color: #f9e2af;
+    }
+
+    .log-entry.log-error {
+      color: #f38ba8;
+      border-left-color: #f38ba8;
+      font-weight: 600;
+    }
+
+    .log-icon {
+      margin-right: 6px;
+    }
+
+    .auto-filled {
+      animation: highlight-fade 2s ease-out;
+    }
+
+    @keyframes highlight-fade {
+      0% { background-color: #e8f0fe; border-color: #667eea; }
+      100% { background-color: transparent; }
+    }
   </style>
 </head>
 <body>
@@ -231,12 +329,12 @@
     <form id="ripForm">
       <div class="form-group">
         <label for="artist">Artist / Band Name *</label>
-        <input type="text" id="artist" name="artist" required placeholder="e.g., The Beatles">
+        <input type="text" id="artist" name="artist" required placeholder="e.g., The Beatles (auto-filled from Side A filename)">
       </div>
 
       <div class="form-group">
         <label for="album">Album Title *</label>
-        <input type="text" id="album" name="album" required placeholder="e.g., Abbey Road">
+        <input type="text" id="album" name="album" required placeholder="e.g., Abbey Road (auto-filled from Side A filename)">
       </div>
 
       <div class="form-group">
@@ -285,6 +383,13 @@
         <div class="progress-fill"></div>
       </div>
       <div class="track-list" id="trackList"></div>
+      <div class="processing-log" id="processingLog" style="display: none;">
+        <div class="processing-log-header" id="logToggle">
+          <h4>📋 Processing Details</h4>
+          <span class="processing-log-toggle" id="logToggleLabel">▼ Show</span>
+        </div>
+        <div class="processing-log-body collapsed" id="logBody"></div>
+      </div>
     </div>
   </div>
 
@@ -296,6 +401,35 @@
     const progressBar = document.getElementById('progressBar');
     const trackList = document.getElementById('trackList');
     const submitBtn = document.getElementById('submitBtn');
+    const processingLogEl = document.getElementById('processingLog');
+    const logBody = document.getElementById('logBody');
+    const logToggle = document.getElementById('logToggle');
+    const logToggleLabel = document.getElementById('logToggleLabel');
+
+    // Toggle processing log
+    logToggle.addEventListener('click', () => {
+      const isCollapsed = logBody.classList.toggle('collapsed');
+      logToggleLabel.textContent = isCollapsed ? '▼ Show' : '▲ Hide';
+    });
+
+    // Parse artist and album from filename like "Artist - Album - Side A.mp3"
+    function parseFilename(filename) {
+      // Remove extension
+      const name = filename.replace(/\.[^.]+$/, '');
+      // Split by " - "
+      const parts = name.split(/\s*-\s*/);
+      if (parts.length >= 2) {
+        const artist = parts[0].trim();
+        // Check if last part looks like a side label (e.g., "Side A", "Side B")
+        const lastPart = parts[parts.length - 1].trim();
+        const isSideLabel = /^side\s*[a-dA-D]$/i.test(lastPart);
+        // Album is everything between artist and the side label
+        const albumParts = isSideLabel ? parts.slice(1, -1) : parts.slice(1);
+        const album = albumParts.join(' - ').trim();
+        return { artist, album: album || null };
+      }
+      return null;
+    }
 
     // Handle file input display
     ['sideA', 'sideB', 'sideC', 'sideD'].forEach(sideId => {
@@ -304,14 +438,69 @@
 
       input.addEventListener('change', (e) => {
         if (e.target.files.length > 0) {
-          display.textContent = e.target.files[0].name;
+          const fileName = e.target.files[0].name;
+          display.textContent = fileName;
           display.classList.add('file-selected');
+
+          // Auto-fill artist and album from Side A filename
+          if (sideId === 'sideA') {
+            const artistInput = document.getElementById('artist');
+            const albumInput = document.getElementById('album');
+            const parsed = parseFilename(fileName);
+            if (parsed) {
+              if (!artistInput.value.trim() && parsed.artist) {
+                artistInput.value = parsed.artist;
+                artistInput.classList.add('auto-filled');
+                setTimeout(() => artistInput.classList.remove('auto-filled'), 2000);
+              }
+              if (!albumInput.value.trim() && parsed.album) {
+                albumInput.value = parsed.album;
+                albumInput.classList.add('auto-filled');
+                setTimeout(() => albumInput.classList.remove('auto-filled'), 2000);
+              }
+            }
+          }
         } else {
           display.textContent = 'No file selected';
           display.classList.remove('file-selected');
         }
       });
     });
+
+    function renderProcessingLog(entries) {
+      if (!entries || entries.length === 0) {
+        processingLogEl.style.display = 'none';
+        return;
+      }
+
+      processingLogEl.style.display = 'block';
+      logBody.innerHTML = '';
+      logBody.classList.remove('collapsed');
+      logToggleLabel.textContent = '▲ Hide';
+
+      const iconMap = {
+        heading: '📌',
+        info: 'ℹ️',
+        success: '✅',
+        warning: '⚠️',
+        error: '❌'
+      };
+
+      for (const entry of entries) {
+        const div = document.createElement('div');
+        const typeClass = `log-${entry.type || 'info'}`;
+        div.className = `log-entry ${typeClass}`;
+        const icon = iconMap[entry.type] || 'ℹ️';
+        div.innerHTML = `<span class="log-icon">${icon}</span>${escapeHtml(entry.message)}`;
+        logBody.appendChild(div);
+      }
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -324,6 +513,8 @@
       statusMessage.textContent = 'Uploading files and analyzing audio. This may take several minutes.';
       progressBar.style.display = 'block';
       trackList.innerHTML = '';
+      processingLogEl.style.display = 'none';
+      logBody.innerHTML = '';
       submitBtn.disabled = true;
 
       try {
@@ -337,7 +528,7 @@
         if (result.success) {
           status.className = 'status show success';
           statusTitle.textContent = '✓ Success!';
-          statusMessage.textContent = `Album ripped successfully! Tracks saved to: ${result.outputDir}`;
+          statusMessage.textContent = `Album ripped successfully! ${result.tracks.length} track(s) saved to: ${result.outputDir}`;
           progressBar.style.display = 'none';
 
           // Display track list
@@ -350,16 +541,19 @@
               trackList.innerHTML += `
                 <div class="track-item">
                   <div>
-                    <div class="track-title">${track.trackNumber}. ${track.title}</div>
-                    <div class="track-meta">${Math.round(track.duration)}s - ${track.fileName}</div>
+                    <div class="track-title">${track.trackNumber}. ${escapeHtml(track.title)}</div>
+                    <div class="track-meta">${formatDuration(track.duration)} - ${escapeHtml(track.fileName)}</div>
                   </div>
                   <span class="confidence ${confidenceClass}">${confidenceLabel}</span>
                 </div>
               `;
             });
           }
+
+          // Show processing log
+          renderProcessingLog(result.processingLog);
         } else {
-          throw new Error(result.error || 'Unknown error occurred');
+          throw { message: result.error || 'Unknown error occurred', processingLog: result.processingLog };
         }
       } catch (error) {
         status.className = 'status show error';
@@ -367,10 +561,20 @@
         statusMessage.textContent = `Failed to rip album: ${error.message}`;
         progressBar.style.display = 'none';
         trackList.innerHTML = '';
+
+        // Show processing log even on error
+        renderProcessingLog(error.processingLog);
       } finally {
         submitBtn.disabled = false;
       }
     });
+
+    function formatDuration(seconds) {
+      if (!seconds) return '?:??';
+      const mins = Math.floor(seconds / 60);
+      const secs = Math.round(seconds % 60);
+      return `${mins}:${String(secs).padStart(2, '0')}`;
+    }
   </script>
 </body>
 </html>

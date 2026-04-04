@@ -17,12 +17,24 @@ export function matchTracks(detectedTracks, officialTracks) {
     'Matching tracks'
   );
 
+  const log = [];
+  log.push({ type: 'info', message: `Matching ${detectedTracks.length} detected track(s) against ${officialTracks.length} official track(s)` });
+  log.push({ type: 'info', message: `Match settings: length tolerance ±${config.matching.lengthTolerance}s, min confidence ${Math.round(config.matching.minConfidence * 100)}%` });
+
+  if (detectedTracks.length !== officialTracks.length) {
+    log.push({
+      type: 'warning',
+      message: `Track count mismatch: detected ${detectedTracks.length} but expected ${officialTracks.length} — track naming may be inaccurate`
+    });
+  }
+
   const matches = [];
   const used = new Set();
 
   for (const detected of detectedTracks) {
     let bestMatch = null;
     let bestConfidence = 0;
+    const detectedDurStr = detected.duration ? `${Math.round(detected.duration)}s` : '?s';
 
     for (let i = 0; i < officialTracks.length; i++) {
       if (used.has(i)) continue;
@@ -49,6 +61,10 @@ export function matchTracks(detectedTracks, officialTracks) {
         officialTrack: bestMatch.track,
         confidence: bestConfidence
       });
+      log.push({
+        type: 'success',
+        message: `Detected track (${detectedDurStr}) → "${bestMatch.track.title}" (${bestMatch.track.length}s) — confidence: ${Math.round(bestConfidence * 100)}%`
+      });
       logger.info(
         {
           trackIndex: detected.index,
@@ -63,11 +79,15 @@ export function matchTracks(detectedTracks, officialTracks) {
         officialTrack: null,
         confidence: 0
       });
+      log.push({
+        type: 'warning',
+        message: `Detected track (${detectedDurStr}) → no match found (no official track within ±${config.matching.lengthTolerance}s tolerance)`
+      });
       logger.warn({ trackIndex: detected.index }, 'No match found for track');
     }
   }
 
-  return matches;
+  return { matches, log };
 }
 
 export function generateTrackName(match, fallbackIndex) {
