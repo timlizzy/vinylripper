@@ -15,6 +15,7 @@ A Node.js application for converting vinyl album recordings into individual trac
 - Length-based track matching with confidence scoring
 - **Detailed processing log** in the browser (album lookup, silence detection, track matching)
 - **Waveform visualization** showing first/last 10 seconds of each track
+- **Configurable output folder** — set default in config, editable per-rip in the UI
 - Structured logging with Pino
 
 ## Prerequisites
@@ -61,8 +62,9 @@ Then open your browser to `http://localhost:3000`
 4. Each side is analyzed: silence detection → music onset detection → smart splitting
 5. Expected track counts from Discogs guide the detection sensitivity
 6. Tracks are matched against the official listing by position and duration
-7. Output is saved to `output/<Artist> - <Album>/`
-8. The browser shows a **processing log** with full details and **waveform previews** per track
+7. Optionally change the **output folder** (defaults to `output/`, configurable in config and UI)
+8. Output is saved to `<outputDir>/<Artist> - <Album>/`
+9. The browser shows a **processing log** with full details and **waveform previews** per track
 
 ## Filename Convention
 
@@ -76,6 +78,7 @@ The app parses `Artist`, `Album`, and `Side X` from the filename and pre-fills t
 ## Configuration
 
 Edit `src/config.js` to adjust:
+- **Output directory** (`outputDir`) — default folder for ripped albums (also editable in the UI)
 - Silence detection threshold and duration
 - Minimum track length
 - API rate limiting

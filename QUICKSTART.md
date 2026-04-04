@@ -28,18 +28,19 @@
    - Example: `Pink Floyd - The Dark Side of the Moon - Side A.mp3`
 2. Upload Side B (and optionally C, D)
 3. Adjust the artist/album fields if needed
-4. Click **"Start Ripping"**
-5. Watch the **Processing Details** log for real-time progress:
+4. Optionally change the **Output Folder** (defaults to the path set in `src/config.js`)
+5. Click **"Start Ripping"**
+6. Watch the **Processing Details** log for real-time progress:
    - Discogs lookup (per-side track counts)
    - MusicBrainz lookup (track names and durations)
    - Silence detection results per side
    - Music onset detection (if silence detection finds too few breaks)
    - Track matching with confidence scores
-6. Review the results:
+7. Review the results:
    - Each track shows its name, duration, and match confidence
    - **Waveform previews** show the first and last 10 seconds of each track
    - Green waveform = track start, amber waveform = track end
-7. Find your tracks in the `output/` directory
+8. Find your tracks in the output directory (shown in the success message)
 
 ### Filename Convention
 
@@ -128,6 +129,9 @@ Edit `src/config.js` to customize:
 {
   // Server port
   port: 3000,
+
+  // Output directory (also editable in the web UI per rip)
+  outputDir: 'output',
 
   // Audio processing
   audio: {
