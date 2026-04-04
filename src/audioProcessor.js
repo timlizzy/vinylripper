@@ -84,7 +84,7 @@ function mergeSilences(silences, mergeGap = 5) {
  * Vinyl lead-in has surface noise (-25 to -35dB) before the song begins (-15 to -20dB).
  * Returns the timestamp where music actually starts.
  */
-async function detectMusicOnset(filePath, searchStart, searchEnd, musicThresholdDb = -22) {
+async function detectMusicOnset(filePath, searchStart, searchEnd, musicThresholdDb = -20) {
   return new Promise((resolve, reject) => {
     const volumes = [];
     // Use astats to get per-frame RMS levels
@@ -121,8 +121,9 @@ async function detectMusicOnset(filePath, searchStart, searchEnd, musicThreshold
         return;
       }
       
-      // Average into 0.1s windows for smoother detection
-      const windowSize = 0.1;
+      // Average into 0.5s windows to smooth out vinyl crackle/pops
+      // Individual crackle peaks can reach -12dB but average much lower over 0.5s
+      const windowSize = 0.5;
       const windows = [];
       let windowStart = 0;
       let windowSum = 0;
@@ -142,14 +143,41 @@ async function detectMusicOnset(filePath, searchStart, searchEnd, musicThreshold
       if (windowCount > 0) {
         windows.push({ time: searchStart + windowStart, rms: windowSum / windowCount });
       }
+
+      // Two-pass detection:
+      // 1. Establish baseline noise level from first few windows
+      // 2. Find where sustained energy significantly exceeds the noise floor
       
-      // Find the first window where average volume exceeds the music threshold
-      // Use a sliding window of 3 to avoid false triggers from clicks/pops
+      // Get baseline from first 2 windows (1 second of vinyl noise)
+      let baseline = -40;
+      if (windows.length >= 2) {
+        baseline = (windows[0].rms + windows[1].rms) / 2;
+      } else if (windows.length === 1) {
+        baseline = windows[0].rms;
+      }
+      
+      // Music onset threshold: either the fixed threshold or significantly above baseline
+      // Vinyl noise typically -28 to -35dB, music typically -10 to -20dB
+      // Use the higher of: fixed threshold, or baseline + 10dB
+      const dynamicThreshold = Math.max(musicThresholdDb, baseline + 10);
+      
+      // Find the first window where sustained volume exceeds the threshold
+      // Use a sliding window of 3 (1.5s) to require sustained energy, not just pops
       for (let i = 0; i < windows.length - 2; i++) {
         const avg = (windows[i].rms + windows[i + 1].rms + windows[i + 2].rms) / 3;
-        if (avg > musicThresholdDb) {
-          // Music detected! Start slightly before (0.15s) for a clean attack
-          const onset = Math.max(searchStart, windows[i].time - 0.15);
+        if (avg > dynamicThreshold) {
+          // Music detected! Start slightly before (0.3s) for a clean attack
+          const onset = Math.max(searchStart, windows[i].time - 0.3);
+          resolve(onset);
+          return;
+        }
+      }
+      
+      // Fallback: try single-window detection with a slightly lower bar
+      // In case the 3-window average never triggers (quiet music start)
+      for (let i = 0; i < windows.length; i++) {
+        if (windows[i].rms > dynamicThreshold) {
+          const onset = Math.max(searchStart, windows[i].time - 0.3);
           resolve(onset);
           return;
         }
@@ -219,20 +247,49 @@ export async function splitAudioFile(filePath, splits, outputDir) {
   return tracks;
 }
 
-export async function processAlbumSide(filePath, outputDir) {
+/**
+ * Process an album side. If expectedTrackCount is provided (from API lookup),
+ * use it to guide silence detection sensitivity and filter results.
+ * 
+ * @param {string} filePath - Path to the audio file
+ * @param {string} outputDir - Directory to write split tracks
+ * @param {object} [expectedInfo] - Optional info from API lookup
+ * @param {number} [expectedInfo.trackCount] - Expected number of tracks on this side
+ * @param {Array}  [expectedInfo.tracks] - Expected tracks with durations
+ */
+export async function processAlbumSide(filePath, outputDir, expectedInfo = null) {
   const duration = await getAudioDuration(filePath);
   logger.info({ filePath, duration }, 'Processing album side');
+
+  const expectedTrackCount = expectedInfo?.trackCount || null;
+  const expectedTracks = expectedInfo?.tracks || null;
 
   const log = [];
   log.push({ type: 'info', message: `Audio duration: ${Math.floor(duration / 60)}m ${Math.round(duration % 60)}s` });
 
-  // Try all silence detection levels and pick the one that finds the most track breaks
+  if (expectedTrackCount) {
+    log.push({ type: 'info', message: `Expected ${expectedTrackCount} track(s) on this side (from API lookup)` });
+    if (expectedTracks) {
+      for (const t of expectedTracks) {
+        const durStr = t.duration ? `${Math.floor(t.duration / 60)}:${String(t.duration % 60).padStart(2, '0')}` : '?:??';
+        log.push({ type: 'info', message: `  → "${t.title}" (${durStr})` });
+      }
+    }
+  }
+
+  const expectedBreaks = expectedTrackCount ? expectedTrackCount - 1 : null;
+
+  // Try all silence detection levels and pick the best one
   const levels = config.audio.silenceDetection;
   let trackBreaks = [];
   let bestLevel = null;
   let bestBreaks = [];
   let bestLeadIn = null;
   let bestRunOut = null;
+  let bestScore = -1;
+
+  // Collect results from all levels for smart selection
+  const allLevelResults = [];
 
   for (const level of levels) {
     const rawSilences = await detectSilences(filePath, level.threshold, level.duration);
@@ -270,17 +327,75 @@ export async function processAlbumSide(filePath, outputDir) {
       });
     }
 
-    log.push({
-      type: filtered.length > bestBreaks.length ? 'success' : 'info',
-      message: `  → ${filtered.length} track break(s) → ${filtered.length + 1} track(s)${filtered.length > bestBreaks.length ? ' (new best)' : ''}`
+    allLevelResults.push({
+      level,
+      filtered,
+      leadIn,
+      runOut,
+      breakCount: filtered.length
     });
 
-    if (filtered.length > bestBreaks.length) {
+    // Score this level's results
+    let score;
+    if (expectedBreaks !== null) {
+      // We know how many breaks to expect — prefer the level closest to expected
+      if (filtered.length === expectedBreaks) {
+        score = 1000; // Perfect match
+      } else if (filtered.length < expectedBreaks) {
+        score = filtered.length; // Too few — lower score
+      } else {
+        // Too many breaks — we can filter down, so still viable
+        score = 500 - (filtered.length - expectedBreaks);
+      }
+    } else {
+      // No expected count — prefer the most breaks (original behavior)
+      score = filtered.length;
+    }
+
+    log.push({
+      type: score > bestScore ? 'success' : 'info',
+      message: `  → ${filtered.length} track break(s) → ${filtered.length + 1} track(s)${expectedBreaks !== null ? ` (expected: ${expectedBreaks} breaks)` : ''}${score > bestScore ? ' (new best)' : ''}`
+    });
+
+    if (score > bestScore) {
+      bestScore = score;
       bestBreaks = filtered;
       bestLevel = level;
       bestLeadIn = leadIn;
       bestRunOut = runOut;
     }
+  }
+
+  // If we have too many breaks compared to expected, filter by silence duration
+  if (expectedBreaks !== null && bestBreaks.length > expectedBreaks && expectedBreaks > 0) {
+    log.push({
+      type: 'info',
+      message: `Too many breaks detected (${bestBreaks.length}) vs expected (${expectedBreaks}) — filtering by silence duration`
+    });
+
+    // Sort by silence duration (longest first) — longer silences are more likely real track gaps
+    const sorted = [...bestBreaks].sort((a, b) => {
+      const durA = (a.end || a.start) - a.start;
+      const durB = (b.end || b.start) - b.start;
+      return durB - durA;
+    });
+
+    // Keep only the top N breaks (matching expected count), sorted back by time
+    const kept = sorted.slice(0, expectedBreaks).sort((a, b) => a.start - b.start);
+
+    // Log which breaks were kept and which were filtered
+    const removedBreaks = sorted.slice(expectedBreaks);
+    for (const r of removedBreaks) {
+      const dur = ((r.end || r.start) - r.start).toFixed(1);
+      const pos = Math.floor(r.start / 60) + ':' + String(Math.round(r.start % 60)).padStart(2, '0');
+      log.push({ type: 'info', message: `  Removed short silence at ${pos} (${dur}s duration)` });
+    }
+
+    bestBreaks = kept;
+    log.push({
+      type: 'success',
+      message: `After filtering: ${bestBreaks.length} break(s) → ${bestBreaks.length + 1} track(s) (matches expected)`
+    });
   }
 
   if (bestBreaks.length >= 1) {
@@ -320,20 +435,24 @@ export async function processAlbumSide(filePath, outputDir) {
 
   // Determine first track start: skip lead-in silence AND vinyl noise
   let firstTrackStart = 0;
-  if (bestLeadIn && bestLeadIn.end) {
-    const silenceEnd = bestLeadIn.end;
-    log.push({ type: 'info', message: `Lead-in silence ends at ${silenceEnd.toFixed(1)}s — scanning for music onset...` });
-    
-    // Scan from silence end to find where actual music starts (not just vinyl noise)
-    const scanEnd = Math.min(silenceEnd + 15, duration); // scan up to 15s after silence ends
-    const musicOnset = await detectMusicOnset(filePath, silenceEnd, scanEnd);
-    firstTrackStart = musicOnset;
-    
-    if (musicOnset > silenceEnd + 0.5) {
-      log.push({ type: 'info', message: `Music onset detected at ${musicOnset.toFixed(1)}s (skipped ${(musicOnset - silenceEnd).toFixed(1)}s of vinyl noise)` });
-    } else {
-      log.push({ type: 'info', message: `Music starts at ${musicOnset.toFixed(1)}s` });
-    }
+  const scanFrom = (bestLeadIn && bestLeadIn.end) ? bestLeadIn.end : 0;
+  const scanTo = Math.min(scanFrom + 15, duration);
+  
+  if (scanFrom > 0) {
+    log.push({ type: 'info', message: `Lead-in silence ends at ${scanFrom.toFixed(1)}s — scanning for music onset...` });
+  } else {
+    log.push({ type: 'info', message: 'Scanning beginning of file for music onset...' });
+  }
+  
+  const musicOnset = await detectMusicOnset(filePath, scanFrom, scanTo);
+  firstTrackStart = musicOnset;
+  
+  if (musicOnset > scanFrom + 0.5) {
+    log.push({ type: 'info', message: `Music onset detected at ${musicOnset.toFixed(1)}s (skipped ${(musicOnset - scanFrom).toFixed(1)}s of vinyl noise after silence)` });
+  } else if (musicOnset > 0.5) {
+    log.push({ type: 'info', message: `Music starts at ${musicOnset.toFixed(1)}s` });
+  } else {
+    log.push({ type: 'info', message: 'Music starts at beginning of file' });
   }
 
   // Determine last track end: cut before run-out
