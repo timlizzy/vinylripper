@@ -181,13 +181,45 @@
     }
 
     .track-item {
-      padding: 10px;
+      padding: 12px;
       background: #f8f9fa;
-      border-radius: 4px;
-      margin-bottom: 8px;
+      border-radius: 6px;
+      margin-bottom: 12px;
+    }
+
+    .track-item-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .track-waveforms {
+      display: flex;
+      gap: 12px;
+      margin-top: 8px;
+    }
+
+    .waveform-container {
+      flex: 1;
+      background: #1e1e2e;
+      border-radius: 4px;
+      padding: 8px;
+      min-width: 0;
+    }
+
+    .waveform-label {
+      font-size: 0.75em;
+      color: #89b4fa;
+      margin-bottom: 4px;
+      font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+    }
+
+    .waveform-canvas {
+      width: 100%;
+      height: 48px;
+      display: block;
+      border-radius: 2px;
     }
 
     .track-title {
@@ -531,23 +563,43 @@
           statusMessage.textContent = `Album ripped successfully! ${result.tracks.length} track(s) saved to: ${result.outputDir}`;
           progressBar.style.display = 'none';
 
-          // Display track list
+          // Display track list with waveforms
           if (result.tracks && result.tracks.length > 0) {
             trackList.innerHTML = '<h4 style="margin-bottom: 10px;">Tracks:</h4>';
-            result.tracks.forEach(track => {
+            result.tracks.forEach((track, idx) => {
               const confidenceClass = track.confidence > 0.8 ? 'high' : track.confidence > 0.5 ? 'medium' : 'low';
               const confidenceLabel = track.matched ? `${Math.round(track.confidence * 100)}%` : 'No match';
 
+              const hasEndWaveform = track.waveform && track.waveform.end;
+              const waveformHtml = track.waveform ? `
+                <div class="track-waveforms">
+                  <div class="waveform-container">
+                    <div class="waveform-label">▶ Start: ${escapeHtml(track.waveform.startLabel || 'first 10s')}</div>
+                    <canvas class="waveform-canvas" id="wf-start-${idx}" data-waveform='${JSON.stringify(track.waveform.start)}' data-color="#a6e3a1"></canvas>
+                  </div>
+                  ${hasEndWaveform ? `
+                  <div class="waveform-container">
+                    <div class="waveform-label">⏹ End: ${escapeHtml(track.waveform.endLabel || 'last 10s')}</div>
+                    <canvas class="waveform-canvas" id="wf-end-${idx}" data-waveform='${JSON.stringify(track.waveform.end)}' data-color="#f9e2af"></canvas>
+                  </div>` : ''}
+                </div>` : '';
+
               trackList.innerHTML += `
                 <div class="track-item">
-                  <div>
-                    <div class="track-title">${track.trackNumber}. ${escapeHtml(track.title)}</div>
-                    <div class="track-meta">${formatDuration(track.duration)} - ${escapeHtml(track.fileName)}</div>
+                  <div class="track-item-header">
+                    <div>
+                      <div class="track-title">${track.trackNumber}. ${escapeHtml(track.title)}</div>
+                      <div class="track-meta">${formatDuration(track.duration)} — ${escapeHtml(track.fileName)}</div>
+                    </div>
+                    <span class="confidence ${confidenceClass}">${confidenceLabel}</span>
                   </div>
-                  <span class="confidence ${confidenceClass}">${confidenceLabel}</span>
+                  ${waveformHtml}
                 </div>
               `;
             });
+
+            // Draw all waveforms after DOM is updated
+            requestAnimationFrame(() => drawAllWaveforms());
           }
 
           // Show processing log
@@ -574,6 +626,70 @@
       const mins = Math.floor(seconds / 60);
       const secs = Math.round(seconds % 60);
       return `${mins}:${String(secs).padStart(2, '0')}`;
+    }
+
+    /**
+     * Draw a waveform on a canvas element from amplitude data.
+     * Renders mirrored bars (like a typical audio waveform display).
+     */
+    function drawWaveform(canvas, data, color) {
+      if (!canvas || !data || data.length === 0) return;
+
+      const dpr = window.devicePixelRatio || 1;
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+
+      const ctx = canvas.getContext('2d');
+      ctx.scale(dpr, dpr);
+
+      const w = rect.width;
+      const h = rect.height;
+      const midY = h / 2;
+      const barWidth = Math.max(1, (w / data.length) - 0.5);
+      const gap = w / data.length;
+
+      // Clear
+      ctx.clearRect(0, 0, w, h);
+
+      // Draw center line
+      ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, midY);
+      ctx.lineTo(w, midY);
+      ctx.stroke();
+
+      // Draw bars
+      ctx.fillStyle = color || '#a6e3a1';
+      for (let i = 0; i < data.length; i++) {
+        const amplitude = Math.max(0.01, data[i]); // minimum visible bar
+        const barHeight = amplitude * (midY - 2);
+        const x = i * gap;
+
+        // Top half (mirrored)
+        ctx.globalAlpha = 0.9;
+        ctx.fillRect(x, midY - barHeight, barWidth, barHeight);
+        // Bottom half (mirrored, slightly dimmer)
+        ctx.globalAlpha = 0.5;
+        ctx.fillRect(x, midY, barWidth, barHeight);
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    /**
+     * Find and draw all waveform canvases on the page.
+     */
+    function drawAllWaveforms() {
+      document.querySelectorAll('.waveform-canvas').forEach(canvas => {
+        try {
+          const data = JSON.parse(canvas.dataset.waveform || '[]');
+          const color = canvas.dataset.color || '#a6e3a1';
+          drawWaveform(canvas, data, color);
+        } catch (e) {
+          // ignore parse errors
+        }
+      });
     }
   </script>
 </body>

@@ -1,6 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { processAlbumSide } from './audioProcessor.js';
+import { processAlbumSide, extractWaveform, getAudioDuration } from './audioProcessor.js';
 import { getAlbumMetadata } from './musicbrainz.js';
 import { searchDiscogsAlbum } from './discogs.js';
 import { matchTracks, generateTrackName } from './trackMatcher.js';
@@ -306,13 +306,28 @@ export async function ripVinylAlbum(sides, artist, album) {
 
       await fs.rename(match.detectedTrack.path, newPath);
 
+      // Extract waveform data for first and last 10 seconds
+      const trackDuration = match.detectedTrack.duration || await getAudioDuration(newPath);
+      const waveformDuration = 10;
+      const startWaveform = await extractWaveform(newPath, 0, Math.min(waveformDuration, trackDuration), 200);
+      const endStart = Math.max(0, trackDuration - waveformDuration);
+      const endWaveform = trackDuration > waveformDuration
+        ? await extractWaveform(newPath, endStart, waveformDuration, 200)
+        : null; // Same as start if track is shorter than 10s
+
       results.push({
         trackNumber: globalTrackNum,
         fileName: newName,
-        duration: match.detectedTrack.duration,
+        duration: trackDuration,
         matched: match.officialTrack !== null,
         title: match.officialTrack?.title || 'Unknown',
-        confidence: match.confidence
+        confidence: match.confidence,
+        waveform: {
+          start: startWaveform,
+          end: endWaveform,
+          startLabel: `0:00 – 0:${String(Math.min(waveformDuration, Math.floor(trackDuration))).padStart(2, '0')}`,
+          endLabel: endWaveform ? `${Math.floor(endStart / 60)}:${String(Math.floor(endStart % 60)).padStart(2, '0')} – ${Math.floor(trackDuration / 60)}:${String(Math.floor(trackDuration % 60)).padStart(2, '0')}` : null
+        }
       });
 
       logger.info({ trackNumber: globalTrackNum, fileName: newName }, 'Track saved');

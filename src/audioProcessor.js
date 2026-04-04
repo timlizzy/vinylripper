@@ -9,6 +9,54 @@ import logger from './logger.js';
 
 const execAsync = promisify(exec);
 
+/**
+ * Extract waveform amplitude data from an audio file for visualization.
+ * Returns an array of normalized peak amplitudes (0-1) suitable for canvas rendering.
+ * 
+ * @param {string} filePath - Path to audio file
+ * @param {number} startSec - Start time in seconds
+ * @param {number} durationSec - Duration to extract in seconds
+ * @param {number} [numBins=200] - Number of amplitude bins to return
+ * @returns {Promise<number[]>} Array of normalized amplitudes (0-1)
+ */
+export async function extractWaveform(filePath, startSec, durationSec, numBins = 200) {
+  return new Promise((resolve) => {
+    // Output mono 16-bit PCM at 8000 Hz — simple and efficient
+    // 8000 samples/sec * durationSec = total samples
+    const sampleRate = 8000;
+    const totalSamples = sampleRate * durationSec;
+    const samplesPerBin = Math.floor(totalSamples / numBins);
+
+    const cmd = `ffmpeg -ss ${startSec} -t ${durationSec} -i "${filePath}" -ac 1 -ar ${sampleRate} -f s16le pipe:1 2>/dev/null`;
+
+    exec(cmd, { maxBuffer: 1024 * 1024 * 20, encoding: 'buffer' }, (error, stdout) => {
+      if (error || !stdout || stdout.length < 4) {
+        resolve(new Array(numBins).fill(0));
+        return;
+      }
+
+      const samples = new Int16Array(stdout.buffer, stdout.byteOffset, Math.floor(stdout.length / 2));
+      const bins = [];
+
+      for (let bin = 0; bin < numBins; bin++) {
+        const start = bin * samplesPerBin;
+        const end = Math.min(start + samplesPerBin, samples.length);
+        let peak = 0;
+
+        for (let j = start; j < end; j++) {
+          const absVal = Math.abs(samples[j]);
+          if (absVal > peak) peak = absVal;
+        }
+
+        // Normalize to 0-1 range (16-bit max = 32767)
+        bins.push(Math.min(1, peak / 32767));
+      }
+
+      resolve(bins);
+    });
+  });
+}
+
 export async function getAudioDuration(filePath) {
   const metadata = await parseFile(filePath);
   return metadata.format.duration;
