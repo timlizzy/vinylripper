@@ -23,16 +23,33 @@
 
 ### Web Interface
 
-1. Enter the artist name (e.g., "Pink Floyd")
-2. Enter the album title (e.g., "The Dark Side of the Moon")
-3. Upload MP3 files for each side:
-   - Side A (required)
-   - Side B (required)
-   - Side C (optional)
-   - Side D (optional)
-4. Click "Start Ripping"
-5. Wait for processing to complete
-6. Find your tracks in the `output/` directory
+1. **Upload Side A** — the artist and album fields are **auto-filled** from the filename
+   - Name your files like: `Artist - Album - Side A.mp3`
+   - Example: `Pink Floyd - The Dark Side of the Moon - Side A.mp3`
+2. Upload Side B (and optionally C, D)
+3. Adjust the artist/album fields if needed
+4. Click **"Start Ripping"**
+5. Watch the **Processing Details** log for real-time progress:
+   - Discogs lookup (per-side track counts)
+   - MusicBrainz lookup (track names and durations)
+   - Silence detection results per side
+   - Music onset detection (if silence detection finds too few breaks)
+   - Track matching with confidence scores
+6. Review the results:
+   - Each track shows its name, duration, and match confidence
+   - **Waveform previews** show the first and last 10 seconds of each track
+   - Green waveform = track start, amber waveform = track end
+7. Find your tracks in the `output/` directory
+
+### Filename Convention
+
+For best results, name your recording files:
+```
+Artist - Album - Side A.mp3
+Artist - Album - Side B.mp3
+```
+
+The app parses the filename and auto-fills the Artist and Album fields. The `Side X` suffix is stripped from the album name.
 
 ### Tips for Best Results
 
@@ -46,26 +63,49 @@
 - Include the full side from start to finish
 - Don't manually split tracks before uploading
 
-**Silence Detection**
+**Track Detection**
 - Works best with clear gaps between tracks
-- For live albums, the app will automatically detect relative quiet sections
+- For live albums, the app automatically detects relative quiet sections
+- If Discogs knows the per-side track count, it guides the detection sensitivity
 - Minimum track length is 30 seconds (configurable)
 
-**MusicBrainz Matching**
-- Enter artist and album names exactly as they appear on MusicBrainz
-- If no match is found, tracks will be named "Unknown Track"
-- You can manually rename tracks afterwards
+**Album Lookup**
+- The app searches **Discogs** first (for per-side track info) and then **MusicBrainz** (for track metadata)
+- Enter artist and album names as they appear on the album
+- The processing log shows exactly what was found (or not found) and why
+- If no match is found, tracks are saved as "Unknown Track"
+
+## Understanding the Processing Log
+
+The **Processing Details** panel in the browser shows exactly what happened:
+
+| Icon | Meaning |
+|------|---------|
+| 📌 | Section heading (Album Lookup, Side A, Track Matching, etc.) |
+| ✅ | Success (album found, track matched, etc.) |
+| ℹ️ | Informational (detection parameters, counts, etc.) |
+| ⚠️ | Warning (no silences found, falling back to alternative method, etc.) |
+| ❌ | Error (API failure, processing error, etc.) |
+
+## Understanding Waveforms
+
+Each track displays two waveform panels:
+- **Green (start)**: First 10 seconds — verify the track starts at the right point
+- **Amber (end)**: Last 10 seconds — verify the track doesn't cut off early
+
+If a waveform shows silence at the start, the split point may be slightly early. If the end waveform cuts off during music, the split may need adjustment.
 
 ## Common Issues
 
 ### No tracks detected
 - Check if your recordings have clear breaks between songs
+- The processing log will show silence detection results and explain what was tried
 - Try adjusting `silenceThreshold` in `src/config.js`
 - For live albums, the app uses loudness analysis automatically
 
 ### Tracks don't match official listing
 - Verify artist and album names are correct
-- Check if the album exists on MusicBrainz
+- Check the processing log for Discogs/MusicBrainz lookup results
 - Track lengths might differ from official versions (vinyl speed variations)
 - Adjust `lengthTolerance` in config if needed
 
@@ -78,7 +118,7 @@
 
 - **Uploads**: `uploads/` (temporary, auto-deleted)
 - **Output**: `output/<Artist> - <Album>/`
-- **Logs**: Console output (can redirect to file)
+- **Logs**: Console output (structured JSON via Pino)
 
 ## Configuration
 
@@ -114,8 +154,8 @@ npm start
 curl -X POST http://localhost:3000/api/rip \
   -F "artist=The Beatles" \
   -F "album=Abbey Road" \
-  -F "sideA=@/path/to/side_a.mp3" \
-  -F "sideB=@/path/to/side_b.mp3"
+  -F "sideA=@/path/to/The Beatles - Abbey Road - Side A.mp3" \
+  -F "sideB=@/path/to/The Beatles - Abbey Road - Side B.mp3"
 
 # Check the output
 ls -la "output/The Beatles - Abbey Road/"
@@ -133,6 +173,7 @@ View logs with pretty formatting (included by default).
 ## Getting Help
 
 - Check `TECHNICAL.md` for detailed architecture documentation
-- Review logs for error messages
+- Review the **Processing Details** panel in the browser for diagnostic info
+- Check console logs for error messages
 - Ensure FFmpeg is working: `ffmpeg -version`
 - Verify file permissions on upload/output directories
