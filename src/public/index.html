@@ -660,10 +660,15 @@
       ctx.lineTo(w, midY);
       ctx.stroke();
 
+      // Normalize: scale so the loudest bar fills the full height,
+      // then apply extra gain (3x) to make quieter waveforms more visible
+      const maxVal = Math.max(...data, 0.001);
+      const gain = Math.min(3.0, 1.0 / maxVal); // auto-gain, capped at 3x
+
       // Draw bars
       ctx.fillStyle = color || '#a6e3a1';
       for (let i = 0; i < data.length; i++) {
-        const amplitude = Math.max(0.01, data[i]); // minimum visible bar
+        const amplitude = Math.min(1.0, Math.max(0.01, data[i] * gain)); // normalize + clamp
         const barHeight = amplitude * (midY - 2);
         const x = i * gap;
 
