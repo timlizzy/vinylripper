@@ -346,7 +346,13 @@ export async function processAlbumSide(filePath, outputDir, expectedInfo = null)
       message: `Silence detection [${level.label}] (${level.threshold}dB, ${level.duration}s): found ${rawSilences.length} raw silence(s)`
     });
 
-    if (rawSilences.length < 2) continue;
+    if (rawSilences.length < 2) {
+      log.push({
+        type: 'warning',
+        message: `  Only ${rawSilences.length} silence(s) found — need at least 2 (lead-in + 1 track gap). Skipping this level.`
+      });
+      continue;
+    }
 
     // Merge nearby silences (vinyl often has multiple short gaps between tracks)
     const merged = mergeSilences(rawSilences, 5);
@@ -469,6 +475,13 @@ export async function processAlbumSide(filePath, outputDir, expectedInfo = null)
 
   if (trackBreaks.length === 0) {
     log.push({ type: 'warning', message: 'No track breaks found at any detection level — entire side will be treated as a single track' });
+    log.push({ type: 'info', message: 'Possible reasons:' });
+    log.push({ type: 'info', message: '  • Recording has no clear silent gaps between tracks (common with live albums, punk, gapless albums)' });
+    log.push({ type: 'info', message: '  • Background noise (vinyl surface noise, hiss) is louder than the silence threshold' });
+    log.push({ type: 'info', message: '  • The entire side may genuinely be a single continuous track' });
+    if (expectedTrackCount && expectedTrackCount > 1) {
+      log.push({ type: 'warning', message: `  Expected ${expectedTrackCount} tracks but could not detect any gaps — you may need to split this side manually` });
+    }
     logger.warn('No split points found, treating as single track');
     return {
       tracks: [{

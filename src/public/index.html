@@ -426,7 +426,7 @@
           <h4>📋 Processing Details</h4>
           <span class="processing-log-toggle" id="logToggleLabel">▼ Show</span>
         </div>
-        <div class="processing-log-body collapsed" id="logBody"></div>
+        <div class="processing-log-body" id="logBody"></div>
       </div>
     </div>
   </div>
@@ -529,7 +529,6 @@
 
       processingLogEl.style.display = 'block';
       logBody.innerHTML = '';
-      logBody.classList.remove('collapsed');
       logToggleLabel.textContent = '▲ Hide';
 
       const iconMap = {
