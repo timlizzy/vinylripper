@@ -42,6 +42,9 @@ const upload = multer({
 // Serve static files
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Serve output directory for cover art and track files
+app.use('/output', express.static(path.resolve(config.outputDir)));
+
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
@@ -80,7 +83,7 @@ app.get('/api/browse-dirs', async (req, res) => {
   }
 });
 
-// Main ripping endpoint
+// Main ripping endpoint — streams progress via newline-delimited JSON
 app.post('/api/rip', upload.fields([
   { name: 'sideA', maxCount: 1 },
   { name: 'sideB', maxCount: 1 },
@@ -139,8 +142,22 @@ app.post('/api/rip', upload.fields([
 
     logger.info({ outputDir: resolvedOutput }, 'Using output directory');
 
-    // Process the vinyl rip
-    const result = await ripVinylAlbum(sides, artist, album, resolvedOutput);
+    // Set up streaming response (newline-delimited JSON)
+    res.setHeader('Content-Type', 'application/x-ndjson');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('X-Accel-Buffering', 'no'); // disable nginx buffering
+
+    // Progress callback: stream each log entry as it happens
+    const onProgress = (entry) => {
+      try {
+        res.write(JSON.stringify({ type: 'progress', entry }) + '\n');
+      } catch (e) {
+        // connection may have been closed
+      }
+    };
+
+    // Process the vinyl rip with streaming progress
+    const result = await ripVinylAlbum(sides, artist, album, resolvedOutput, onProgress);
 
     // Clean up uploaded files
     for (const side of sides) {
@@ -153,7 +170,9 @@ app.post('/api/rip', upload.fields([
 
     logger.info({ duration: Date.now() - startTime }, 'Request completed successfully');
 
-    res.json(result);
+    // Send final result as the last line
+    res.write(JSON.stringify({ type: 'result', data: result }) + '\n');
+    res.end();
   } catch (error) {
     logger.error({ error: error.message, stack: error.stack }, 'Request failed');
 
@@ -170,11 +189,26 @@ app.post('/api/rip', upload.fields([
       }
     }
 
-    res.status(500).json({
-      success: false,
-      error: error.message,
-      processingLog: error.processingLog || []
-    });
+    try {
+      res.write(JSON.stringify({
+        type: 'result',
+        data: {
+          success: false,
+          error: error.message,
+          processingLog: error.processingLog || []
+        }
+      }) + '\n');
+      res.end();
+    } catch (e) {
+      // If headers not sent yet, send JSON error
+      if (!res.headersSent) {
+        res.status(500).json({
+          success: false,
+          error: error.message,
+          processingLog: error.processingLog || []
+        });
+      }
+    }
   }
 });
 

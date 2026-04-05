@@ -17,15 +17,22 @@ import logger from './logger.js';
  * 3. Match detected tracks against official track listing
  * 4. Rename and save output files
  */
-export async function ripVinylAlbum(sides, artist, album, baseOutputDir = 'output') {
+export async function ripVinylAlbum(sides, artist, album, baseOutputDir = 'output', onProgress = null) {
   const startTime = Date.now();
   logger.info({ artist, album, sideCount: sides.length }, 'Starting vinyl rip process');
 
   const processingLog = [];
 
+  function log(entry) {
+    processingLog.push(entry);
+    if (onProgress) {
+      try { onProgress(entry); } catch (e) { /* ignore callback errors */ }
+    }
+  }
+
   try {
     // ─── STEP 1: Look up album metadata FIRST ───────────────────────
-    processingLog.push({ type: 'heading', message: 'Album Lookup' });
+    log({ type: 'heading', message: 'Album Lookup' });
 
     // Try Discogs first (best for vinyl per-side info)
     let discogsResult = null;
@@ -34,7 +41,7 @@ export async function ripVinylAlbum(sides, artist, album, baseOutputDir = 'outpu
     try {
       discogsResult = await searchDiscogsAlbum(artist, album);
       if (discogsResult.log) {
-        processingLog.push(...discogsResult.log);
+        discogsResult.log.forEach(e => log(e));
       }
 
       if (discogsResult.sides) {
@@ -48,30 +55,30 @@ export async function ripVinylAlbum(sides, artist, album, baseOutputDir = 'outpu
             };
           }
         }
-        processingLog.push({
+        log({
           type: 'success',
           message: `Discogs provides per-side track info: ${Object.entries(perSideInfo).map(([k, v]) => `Side ${k}=${v.trackCount}`).join(', ')}`
         });
       }
     } catch (error) {
       logger.warn({ error: error.message }, 'Discogs lookup failed');
-      processingLog.push({ type: 'warning', message: `Discogs lookup failed: ${error.message}` });
+      log({ type: 'warning', message: `Discogs lookup failed: ${error.message}` });
     }
 
     // Also look up MusicBrainz (used for matching and as fallback)
-    processingLog.push({ type: 'heading', message: 'MusicBrainz Lookup' });
+    log({ type: 'heading', message: 'MusicBrainz Lookup' });
     let metadata = null;
     try {
       metadata = await getAlbumMetadata(artist, album);
       if (metadata && metadata.log) {
-        processingLog.push(...metadata.log);
+        metadata.log.forEach(e => log(e));
       }
     } catch (error) {
       logger.warn({ error: error.message }, 'MusicBrainz lookup failed');
       if (error.log) {
-        processingLog.push(...error.log);
+        error.log.forEach(e => log(e));
       }
-      processingLog.push({ type: 'warning', message: `MusicBrainz lookup failed: ${error.message}` });
+      log({ type: 'warning', message: `MusicBrainz lookup failed: ${error.message}` });
     }
 
     // If no Discogs per-side info, try to derive it from MusicBrainz multi-media
@@ -89,7 +96,7 @@ export async function ripVinylAlbum(sides, artist, album, baseOutputDir = 'outpu
           }))
         };
       }
-      processingLog.push({
+      log({
         type: 'info',
         message: `Using MusicBrainz multi-media info: ${Object.entries(perSideInfo).map(([k, v]) => `Side ${k}=${v.trackCount}`).join(', ')}`
       });
@@ -97,11 +104,11 @@ export async function ripVinylAlbum(sides, artist, album, baseOutputDir = 'outpu
 
     // Summary of what we know
     if (perSideInfo) {
-      processingLog.push({ type: 'success', message: 'Per-side track info available — will guide silence detection' });
+      log({ type: 'success', message: 'Per-side track info available — will guide silence detection' });
     } else if (metadata && metadata.tracks && metadata.tracks.length > 0) {
-      processingLog.push({ type: 'info', message: `No per-side info — have ${metadata.tracks.length} total tracks from MusicBrainz` });
+      log({ type: 'info', message: `No per-side info — have ${metadata.tracks.length} total tracks from MusicBrainz` });
     } else {
-      processingLog.push({ type: 'warning', message: 'No album metadata found — silence detection will use default sensitivity' });
+      log({ type: 'warning', message: 'No album metadata found — silence detection will use default sensitivity' });
     }
 
     // ─── STEP 2: Process each side with expected track info ──────────
@@ -114,7 +121,7 @@ export async function ripVinylAlbum(sides, artist, album, baseOutputDir = 'outpu
       const side = sides[i];
       const sideLabel = side.label; // 'A', 'B', etc.
       logger.info({ side: sideLabel, file: side.file }, 'Processing side');
-      processingLog.push({ type: 'heading', message: `Side ${sideLabel}: ${side.file}` });
+      log({ type: 'heading', message: `Side ${sideLabel}: ${side.file}` });
 
       // Pass expected info for this side if available
       const expectedInfo = perSideInfo?.[sideLabel] || null;
@@ -123,8 +130,8 @@ export async function ripVinylAlbum(sides, artist, album, baseOutputDir = 'outpu
       const tracks = result.tracks || result;
       const sideLog = result.log || [];
 
-      processingLog.push(...sideLog);
-      processingLog.push({ type: 'info', message: `Side ${sideLabel}: ${tracks.length} track(s) detected` });
+      sideLog.forEach(e => log(e));
+      log({ type: 'info', message: `Side ${sideLabel}: ${tracks.length} track(s) detected` });
 
       sideResults.push({
         label: sideLabel,
@@ -137,11 +144,11 @@ export async function ripVinylAlbum(sides, artist, album, baseOutputDir = 'outpu
     logger.info({ totalTracks: allTracks.length }, 'All sides processed');
 
     let matches = [];
-    processingLog.push({ type: 'heading', message: 'Track Matching' });
+    log({ type: 'heading', message: 'Track Matching' });
 
     // Prefer Discogs per-side info for matching
     if (perSideInfo && Object.keys(perSideInfo).length > 0) {
-      processingLog.push({ type: 'info', message: 'Matching using per-side track info from Discogs' });
+      log({ type: 'info', message: 'Matching using per-side track info from Discogs' });
 
       for (let i = 0; i < sideResults.length; i++) {
         const sideLabel = sideResults[i].label;
@@ -149,7 +156,7 @@ export async function ripVinylAlbum(sides, artist, album, baseOutputDir = 'outpu
         const sideExpected = perSideInfo[sideLabel];
 
         if (sideExpected && sideExpected.tracks) {
-          processingLog.push({
+          log({
             type: 'info',
             message: `Side ${sideLabel}: ${sideDetected.length} detected vs ${sideExpected.trackCount} expected`
           });
@@ -183,12 +190,12 @@ export async function ripVinylAlbum(sides, artist, album, baseOutputDir = 'outpu
               const durStr = officialTrack.duration
                 ? ` (${Math.floor(officialTrack.duration / 60)}:${String(officialTrack.duration % 60).padStart(2, '0')})`
                 : '';
-              processingLog.push({
+              log({
                 type: 'success',
                 message: `  ${officialTrack.position || (j + 1)}. "${officialTrack.title}"${durStr} — confidence: ${Math.round(confidence * 100)}%`
               });
             } else {
-              processingLog.push({
+              log({
                 type: 'warning',
                 message: `  Track ${j + 1}: no matching official track on this side`
               });
@@ -196,7 +203,7 @@ export async function ripVinylAlbum(sides, artist, album, baseOutputDir = 'outpu
           }
         } else {
           // No expected info for this side, try fallback
-          processingLog.push({
+          log({
             type: 'warning',
             message: `Side ${sideLabel}: no expected track info — tracks will be unnamed`
           });
@@ -218,22 +225,22 @@ export async function ripVinylAlbum(sides, artist, album, baseOutputDir = 'outpu
       const hasMultipleMedia = metadata.mediaInfo && metadata.mediaInfo.length > 1;
 
       if (hasMultipleMedia && metadata.mediaInfo.length === sideResults.length) {
-        processingLog.push({ type: 'info', message: `MusicBrainz: ${metadata.mediaInfo.length} media matching ${sideResults.length} sides — matching per side` });
+        log({ type: 'info', message: `MusicBrainz: ${metadata.mediaInfo.length} media matching ${sideResults.length} sides — matching per side` });
 
         for (let i = 0; i < sideResults.length; i++) {
           const sideDetected = sideResults[i].tracks;
           const sideOfficial = metadata.mediaInfo[i].tracks;
-          processingLog.push({ type: 'info', message: `Side ${sideResults[i].label}: ${sideDetected.length} detected vs ${sideOfficial.length} official` });
+          log({ type: 'info', message: `Side ${sideResults[i].label}: ${sideDetected.length} detected vs ${sideOfficial.length} official` });
 
           const matchResult = matchTracks(sideDetected, sideOfficial);
           const sideMatches = matchResult.matches || matchResult;
           if (matchResult.log) {
-            processingLog.push(...matchResult.log);
+            matchResult.log.forEach(e => log(e));
           }
           matches.push(...sideMatches);
         }
       } else if (!hasMultipleMedia && officialTracks.length >= totalDetected) {
-        processingLog.push({
+        log({
           type: 'info',
           message: `MusicBrainz: single medium with ${officialTracks.length} tracks — splitting by detected side counts: ${sideTrackCounts.map((c, i) => `Side ${sideResults[i].label}=${c}`).join(', ')}`
         });
@@ -243,7 +250,7 @@ export async function ripVinylAlbum(sides, artist, album, baseOutputDir = 'outpu
           const sideDetected = sideResults[i].tracks;
           const sideOfficialSlice = officialTracks.slice(offset, offset + sideDetected.length);
 
-          processingLog.push({
+          log({
             type: 'info',
             message: `Side ${sideResults[i].label}: matching ${sideDetected.length} detected track(s) against official tracks ${offset + 1}-${offset + sideDetected.length}`
           });
@@ -257,7 +264,7 @@ export async function ripVinylAlbum(sides, artist, album, baseOutputDir = 'outpu
               method: 'side-order'
             });
             if (officialTrack) {
-              processingLog.push({
+              log({
                 type: 'success',
                 message: `  Track ${offset + j + 1}: "${officialTrack.title}" (assigned by position on side ${sideResults[i].label})`
               });
@@ -268,21 +275,21 @@ export async function ripVinylAlbum(sides, artist, album, baseOutputDir = 'outpu
         }
 
         if (offset < officialTracks.length) {
-          processingLog.push({
+          log({
             type: 'warning',
             message: `${officialTracks.length - offset} official track(s) not assigned (detected fewer tracks than expected)`
           });
         }
       } else {
-        processingLog.push({ type: 'info', message: `Falling back to matching all ${totalDetected} detected track(s) against ${officialTracks.length} official track(s)` });
+        log({ type: 'info', message: `Falling back to matching all ${totalDetected} detected track(s) against ${officialTracks.length} official track(s)` });
         const matchResult = matchTracks(allTracks, officialTracks);
         matches = matchResult.matches || matchResult;
         if (matchResult.log) {
-          processingLog.push(...matchResult.log);
+          matchResult.log.forEach(e => log(e));
         }
       }
     } else {
-      processingLog.push({ type: 'warning', message: 'No metadata available — all tracks will be saved as "Unknown Track"' });
+      log({ type: 'warning', message: 'No metadata available — all tracks will be saved as "Unknown Track"' });
       matches = allTracks.map(track => ({
         detectedTrack: track,
         officialTrack: null,
@@ -299,7 +306,7 @@ export async function ripVinylAlbum(sides, artist, album, baseOutputDir = 'outpu
     const results = [];
 
     // ─── STEP 4a: Fetch cover art ─────────────────────────────────────
-    processingLog.push({ type: 'heading', message: 'Cover Art' });
+    log({ type: 'heading', message: 'Cover Art' });
     let coverArtBuffer = null;
     let coverArtMimeType = null;
 
@@ -309,7 +316,7 @@ export async function ripVinylAlbum(sides, artist, album, baseOutputDir = 'outpu
         metadata.release.id,
         metadata.release.releaseGroupId
       );
-      if (caaResult.log) processingLog.push(...caaResult.log);
+      if (caaResult.log) caaResult.log.forEach(e => log(e));
       if (caaResult.imageBuffer) {
         coverArtBuffer = caaResult.imageBuffer;
         coverArtMimeType = caaResult.mimeType;
@@ -318,19 +325,19 @@ export async function ripVinylAlbum(sides, artist, album, baseOutputDir = 'outpu
 
     // Fall back to Discogs cover art
     if (!coverArtBuffer && discogsResult?.release?.coverArtUrl) {
-      processingLog.push({ type: 'info', message: 'Trying Discogs cover art as fallback...' });
+      log({ type: 'info', message: 'Trying Discogs cover art as fallback...' });
       const discogsImg = await fetchImageFromUrl(discogsResult.release.coverArtUrl);
       if (discogsImg.imageBuffer) {
         coverArtBuffer = discogsImg.imageBuffer;
         coverArtMimeType = discogsImg.mimeType;
-        processingLog.push({ type: 'success', message: `Cover art from Discogs (${(coverArtBuffer.length / 1024).toFixed(0)} KB)` });
+        log({ type: 'success', message: `Cover art from Discogs (${(coverArtBuffer.length / 1024).toFixed(0)} KB)` });
       } else {
-        processingLog.push({ type: 'warning', message: 'Failed to download Discogs cover art' });
+        log({ type: 'warning', message: 'Failed to download Discogs cover art' });
       }
     }
 
     if (!coverArtBuffer) {
-      processingLog.push({ type: 'warning', message: 'No cover art found from any source' });
+      log({ type: 'warning', message: 'No cover art found from any source' });
     }
 
     // Save cover art to output folder
@@ -338,7 +345,7 @@ export async function ripVinylAlbum(sides, artist, album, baseOutputDir = 'outpu
       const ext = coverArtMimeType?.includes('png') ? 'png' : 'jpg';
       const coverPath = path.join(outputDir, `cover.${ext}`);
       await fs.writeFile(coverPath, coverArtBuffer);
-      processingLog.push({ type: 'success', message: `Cover art saved: cover.${ext}` });
+      log({ type: 'success', message: `Cover art saved: cover.${ext}` });
       logger.info({ coverPath, size: coverArtBuffer.length }, 'Cover art saved to output folder');
     }
 
@@ -350,13 +357,13 @@ export async function ripVinylAlbum(sides, artist, album, baseOutputDir = 'outpu
     const totalTracks = matches.length;
 
     // ─── STEP 4c: Save, normalize, and tag output files ─────────────────
-    processingLog.push({ type: 'heading', message: 'Output' });
+    log({ type: 'heading', message: 'Output' });
 
     // Normalize loudness if enabled
     const normConfig = config.normalization || {};
     const normEnabled = normConfig.enabled !== false;
     if (normEnabled) {
-      processingLog.push({
+      log({
         type: 'info',
         message: `Loudness normalization: EBU R128, target ${normConfig.targetLoudness || -14} LUFS, peak ceiling ${normConfig.truePeak || -1.0} dBTP`
       });
@@ -373,14 +380,14 @@ export async function ripVinylAlbum(sides, artist, album, baseOutputDir = 'outpu
 
       // Normalize loudness (in-place, before waveform extraction so waveforms reflect final audio)
       if (normEnabled) {
-        processingLog.push({ type: 'info', message: `Normalizing track ${globalTrackNum}: "${match.officialTrack?.title || 'Unknown Track'}"` });
+        log({ type: 'info', message: `Normalizing track ${globalTrackNum}: "${match.officialTrack?.title || 'Unknown Track'}"` });
         const normResult = await normalizeAudio(newPath, {
           targetLoudness: normConfig.targetLoudness || -14,
           truePeak: normConfig.truePeak || -1.0,
           loudnessRange: normConfig.loudnessRange || 0
         });
         if (normResult.log) {
-          processingLog.push(...normResult.log);
+          normResult.log.forEach(e => log(e));
         }
       }
 
@@ -420,13 +427,13 @@ export async function ripVinylAlbum(sides, artist, album, baseOutputDir = 'outpu
           if (albumYear) tagInfo.push(`year: ${albumYear}`);
           if (albumGenre) tagInfo.push(`genre: ${albumGenre}`);
           if (coverArtBuffer) tagInfo.push('+ cover art');
-          processingLog.push({ type: 'success', message: `ID3 tags: ${tagInfo.join(', ')}` });
+          log({ type: 'success', message: `ID3 tags: ${tagInfo.join(', ')}` });
         } else {
-          processingLog.push({ type: 'warning', message: `ID3 tag write returned unexpected result for track ${globalTrackNum}` });
+          log({ type: 'warning', message: `ID3 tag write returned unexpected result for track ${globalTrackNum}` });
         }
       } catch (tagError) {
         logger.warn({ error: tagError.message, track: globalTrackNum }, 'Failed to write ID3 tags');
-        processingLog.push({ type: 'warning', message: `Failed to write ID3 tags for track ${globalTrackNum}: ${tagError.message}` });
+        log({ type: 'warning', message: `Failed to write ID3 tags for track ${globalTrackNum}: ${tagError.message}` });
       }
 
       // Extract waveform data for first and last 10 seconds
@@ -457,7 +464,7 @@ export async function ripVinylAlbum(sides, artist, album, baseOutputDir = 'outpu
       globalTrackNum++;
     }
 
-    processingLog.push({ type: 'success', message: `Saved ${results.length} track(s) to ${outputDir}` });
+    log({ type: 'success', message: `Saved ${results.length} track(s) to ${outputDir}` });
 
     // Clean up temp directory
     try {
@@ -481,7 +488,7 @@ export async function ripVinylAlbum(sides, artist, album, baseOutputDir = 'outpu
     };
   } catch (error) {
     logger.error({ error: error.message, stack: error.stack }, 'Vinyl rip failed');
-    processingLog.push({ type: 'error', message: `Processing failed: ${error.message}` });
+    log({ type: 'error', message: `Processing failed: ${error.message}` });
     error.processingLog = processingLog;
     throw error;
   }

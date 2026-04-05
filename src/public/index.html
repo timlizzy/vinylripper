@@ -707,13 +707,13 @@
 
       const formData = new FormData(form);
 
-      // Show processing status
+      // Show processing status with live log
       status.className = 'status show processing';
       statusTitle.textContent = 'Processing...';
-      statusMessage.textContent = 'Uploading files and analyzing audio. This may take several minutes.';
+      statusMessage.textContent = 'Uploading files and analyzing audio...';
       progressBar.style.display = 'block';
       trackList.innerHTML = '';
-      processingLogEl.style.display = 'none';
+      processingLogEl.style.display = 'block';
       logBody.innerHTML = '';
       submitBtn.disabled = true;
 
@@ -723,18 +723,79 @@
           body: formData
         });
 
-        const result = await response.json();
+        if (!response.ok && response.headers.get('content-type')?.includes('application/json')) {
+          const errData = await response.json();
+          throw { message: errData.error || 'Request failed', processingLog: errData.processingLog };
+        }
 
-        if (result.success) {
+        // Read NDJSON streaming response
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let finalResult = null;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop(); // keep incomplete last line in buffer
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const msg = JSON.parse(line);
+              if (msg.type === 'progress' && msg.entry) {
+                // Render live log entry
+                renderLogEntry(msg.entry);
+                // Update status message based on headings
+                if (msg.entry.type === 'heading') {
+                  statusMessage.textContent = msg.entry.message + '...';
+                }
+              } else if (msg.type === 'result') {
+                finalResult = msg.data;
+              }
+            } catch (parseErr) {
+              // skip unparseable lines
+            }
+          }
+        }
+
+        // Process any remaining buffer
+        if (buffer.trim()) {
+          try {
+            const msg = JSON.parse(buffer);
+            if (msg.type === 'result') finalResult = msg.data;
+          } catch (e) {}
+        }
+
+        if (!finalResult) {
+          throw { message: 'No result received from server' };
+        }
+
+        if (finalResult.success) {
           status.className = 'status show success';
           statusTitle.textContent = '✓ Success!';
-          statusMessage.textContent = `Album ripped successfully! ${result.tracks.length} track(s) saved to: ${result.outputDir}`;
+          statusMessage.textContent = `Album ripped successfully! ${finalResult.tracks.length} track(s) saved to: ${finalResult.outputDir}`;
           progressBar.style.display = 'none';
 
+          // Show cover art if available
+          const albumDir = finalResult.outputDir;
+          const coverUrl = `/output/${encodeURIComponent(albumDir.split('/').pop())}/cover.jpg`;
+          const coverImg = new Image();
+          coverImg.onload = () => {
+            const coverDiv = document.createElement('div');
+            coverDiv.style.cssText = 'text-align:center; margin: 16px 0;';
+            coverDiv.innerHTML = `<img src="${escapeHtml(coverUrl)}" alt="Cover Art" style="max-width:300px; border-radius:8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">`;
+            trackList.parentNode.insertBefore(coverDiv, trackList);
+          };
+          coverImg.src = coverUrl;
+
           // Display track list with waveforms
-          if (result.tracks && result.tracks.length > 0) {
+          if (finalResult.tracks && finalResult.tracks.length > 0) {
             trackList.innerHTML = '<h4 style="margin-bottom: 10px;">Tracks:</h4>';
-            result.tracks.forEach((track, idx) => {
+            finalResult.tracks.forEach((track, idx) => {
               const confidenceClass = track.confidence > 0.8 ? 'high' : track.confidence > 0.5 ? 'medium' : 'low';
               const confidenceLabel = track.matched ? `${Math.round(track.confidence * 100)}%` : 'No match';
 
@@ -769,11 +830,8 @@
             // Draw all waveforms after DOM is updated
             requestAnimationFrame(() => drawAllWaveforms());
           }
-
-          // Show processing log
-          renderProcessingLog(result.processingLog);
         } else {
-          throw { message: result.error || 'Unknown error occurred', processingLog: result.processingLog };
+          throw { message: finalResult.error || 'Unknown error occurred', processingLog: finalResult.processingLog };
         }
       } catch (error) {
         status.className = 'status show error';
@@ -782,12 +840,30 @@
         progressBar.style.display = 'none';
         trackList.innerHTML = '';
 
-        // Show processing log even on error
-        renderProcessingLog(error.processingLog);
+        // Show processing log even on error (if not already rendered live)
+        if (error.processingLog && logBody.children.length === 0) {
+          renderProcessingLog(error.processingLog);
+        }
       } finally {
         submitBtn.disabled = false;
       }
     });
+
+    /** Render a single log entry into the live processing log */
+    function renderLogEntry(entry) {
+      if (!entry) return;
+      const typeClass = entry.type || 'info';
+      const icon = entry.type === 'heading' ? '📌' :
+                   entry.type === 'success' ? '✅' :
+                   entry.type === 'warning' ? '⚠️' :
+                   entry.type === 'error' ? '❌' : 'ℹ️';
+      const el = document.createElement('div');
+      el.className = `log-entry log-${typeClass}`;
+      el.innerHTML = `<span class="log-icon">${icon}</span><span class="log-text">${escapeHtml(entry.message)}</span>`;
+      logBody.appendChild(el);
+      // Auto-scroll to bottom
+      logBody.scrollTop = logBody.scrollHeight;
+    }
 
     function formatDuration(seconds) {
       if (!seconds) return '?:??';
