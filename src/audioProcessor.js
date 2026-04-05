@@ -281,7 +281,7 @@ export async function splitAudioFile(filePath, splits, outputDir) {
       // Trim silence from both start AND end (after the cut is made)
       // Start: aggressive to remove crackling
       // End: conservative to avoid cutting music too early
-      filters.push('silenceremove=start_periods=1:start_threshold=-30dB:start_duration=0.05:stop_periods=-1:stop_threshold=-50dB:stop_duration=0.5');
+      filters.push('silenceremove=start_periods=1:start_threshold=-40dB:start_duration=0.05:stop_periods=-1:stop_threshold=-50dB:stop_duration=0.5');
 
       const command = ffmpeg(filePath)
         .audioCodec('libmp3lame')
