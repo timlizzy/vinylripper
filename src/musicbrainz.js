@@ -78,7 +78,10 @@ export async function searchAlbum(artist, album) {
       release: {
         id: release.id,
         title: release.title,
-        artist: release['artist-credit']?.[0]?.name || artist
+        artist: release['artist-credit']?.[0]?.name || artist,
+        date: release.date || null,
+        year: release.date ? release.date.substring(0, 4) : null,
+        releaseGroupId: release['release-group']?.id || null
       },
       log
     };
@@ -161,6 +164,79 @@ export async function getTrackListing(releaseId) {
     log.push({ type: 'error', message: `Failed to fetch track listing: ${error.message}` });
     throw Object.assign(error, { log });
   }
+}
+
+/**
+ * Fetch cover art from the Cover Art Archive (associated with MusicBrainz).
+ * Tries release-specific art first, then falls back to release-group art.
+ * 
+ * @param {string} releaseId - MusicBrainz release ID
+ * @param {string} [releaseGroupId] - MusicBrainz release-group ID (fallback)
+ * @returns {Promise<{imageBuffer: Buffer|null, mimeType: string|null, source: string|null, log: Array}>}
+ */
+export async function fetchCoverArt(releaseId, releaseGroupId = null) {
+  const log = [];
+  const CAA_BASE = 'https://coverartarchive.org';
+
+  // Try release-specific cover first
+  const urls = [
+    { url: `${CAA_BASE}/release/${releaseId}/front-500`, label: `Cover Art Archive (release ${releaseId})` }
+  ];
+  if (releaseGroupId) {
+    urls.push({ url: `${CAA_BASE}/release-group/${releaseGroupId}/front-500`, label: `Cover Art Archive (release-group)` });
+  }
+
+  for (const { url, label } of urls) {
+    try {
+      await sleep(1000);
+      logger.info({ url }, 'Fetching cover art');
+      
+      const response = await fetch(url, {
+        headers: { 'User-Agent': USER_AGENT },
+        redirect: 'follow'
+      });
+
+      if (response.ok) {
+        const contentType = response.headers.get('content-type') || 'image/jpeg';
+        const arrayBuffer = await response.arrayBuffer();
+        const imageBuffer = Buffer.from(arrayBuffer);
+        
+        log.push({ type: 'success', message: `Cover art found: ${label} (${(imageBuffer.length / 1024).toFixed(0)} KB)` });
+        return { imageBuffer, mimeType: contentType, source: label, log };
+      } else if (response.status === 404) {
+        log.push({ type: 'info', message: `No cover art at: ${label}` });
+      } else {
+        log.push({ type: 'warning', message: `Cover Art Archive returned ${response.status} for ${label}` });
+      }
+    } catch (error) {
+      log.push({ type: 'warning', message: `Failed to fetch from ${label}: ${error.message}` });
+    }
+  }
+
+  log.push({ type: 'info', message: 'No cover art found in Cover Art Archive' });
+  return { imageBuffer: null, mimeType: null, source: null, log };
+}
+
+/**
+ * Fetch cover art from a URL (e.g., Discogs image URL).
+ * @param {string} url - Direct URL to the image
+ * @returns {Promise<{imageBuffer: Buffer|null, mimeType: string|null}>}
+ */
+export async function fetchImageFromUrl(url) {
+  try {
+    const response = await fetch(url, {
+      headers: { 'User-Agent': USER_AGENT },
+      redirect: 'follow'
+    });
+    if (response.ok) {
+      const contentType = response.headers.get('content-type') || 'image/jpeg';
+      const arrayBuffer = await response.arrayBuffer();
+      return { imageBuffer: Buffer.from(arrayBuffer), mimeType: contentType };
+    }
+  } catch (error) {
+    logger.warn({ error: error.message, url }, 'Failed to fetch image from URL');
+  }
+  return { imageBuffer: null, mimeType: null };
 }
 
 export async function getAlbumMetadata(artist, album) {

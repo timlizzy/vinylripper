@@ -1,8 +1,9 @@
 import fs from 'fs/promises';
 import path from 'path';
+import NodeID3 from 'node-id3';
 import { processAlbumSide, extractWaveform, getAudioDuration, normalizeAudio } from './audioProcessor.js';
 import config from './config.js';
-import { getAlbumMetadata } from './musicbrainz.js';
+import { getAlbumMetadata, fetchCoverArt, fetchImageFromUrl } from './musicbrainz.js';
 import { searchDiscogsAlbum } from './discogs.js';
 import { matchTracks, generateTrackName } from './trackMatcher.js';
 import logger from './logger.js';
@@ -297,7 +298,58 @@ export async function ripVinylAlbum(sides, artist, album, baseOutputDir = 'outpu
 
     const results = [];
 
-    // ─── STEP 4a: Save and normalize output files ─────────────────────
+    // ─── STEP 4a: Fetch cover art ─────────────────────────────────────
+    processingLog.push({ type: 'heading', message: 'Cover Art' });
+    let coverArtBuffer = null;
+    let coverArtMimeType = null;
+
+    // Try Cover Art Archive (MusicBrainz) first
+    if (metadata?.release?.id) {
+      const caaResult = await fetchCoverArt(
+        metadata.release.id,
+        metadata.release.releaseGroupId
+      );
+      if (caaResult.log) processingLog.push(...caaResult.log);
+      if (caaResult.imageBuffer) {
+        coverArtBuffer = caaResult.imageBuffer;
+        coverArtMimeType = caaResult.mimeType;
+      }
+    }
+
+    // Fall back to Discogs cover art
+    if (!coverArtBuffer && discogsResult?.release?.coverArtUrl) {
+      processingLog.push({ type: 'info', message: 'Trying Discogs cover art as fallback...' });
+      const discogsImg = await fetchImageFromUrl(discogsResult.release.coverArtUrl);
+      if (discogsImg.imageBuffer) {
+        coverArtBuffer = discogsImg.imageBuffer;
+        coverArtMimeType = discogsImg.mimeType;
+        processingLog.push({ type: 'success', message: `Cover art from Discogs (${(coverArtBuffer.length / 1024).toFixed(0)} KB)` });
+      } else {
+        processingLog.push({ type: 'warning', message: 'Failed to download Discogs cover art' });
+      }
+    }
+
+    if (!coverArtBuffer) {
+      processingLog.push({ type: 'warning', message: 'No cover art found from any source' });
+    }
+
+    // Save cover art to output folder
+    if (coverArtBuffer) {
+      const ext = coverArtMimeType?.includes('png') ? 'png' : 'jpg';
+      const coverPath = path.join(outputDir, `cover.${ext}`);
+      await fs.writeFile(coverPath, coverArtBuffer);
+      processingLog.push({ type: 'success', message: `Cover art saved: cover.${ext}` });
+      logger.info({ coverPath, size: coverArtBuffer.length }, 'Cover art saved to output folder');
+    }
+
+    // ─── STEP 4b: Collect album metadata for ID3 tags ──────────────────
+    const albumYear = discogsResult?.release?.year
+      || metadata?.release?.year
+      || null;
+    const albumGenre = discogsResult?.release?.genres?.[0] || null;
+    const totalTracks = matches.length;
+
+    // ─── STEP 4c: Save, normalize, and tag output files ─────────────────
     processingLog.push({ type: 'heading', message: 'Output' });
 
     // Normalize loudness if enabled
@@ -330,6 +382,51 @@ export async function ripVinylAlbum(sides, artist, album, baseOutputDir = 'outpu
         if (normResult.log) {
           processingLog.push(...normResult.log);
         }
+      }
+
+      // ─── Write ID3 tags ──────────────────────────────────────────────
+      const trackTitle = match.officialTrack?.title || 'Unknown Track';
+      const id3Tags = {
+        title: trackTitle,
+        artist: artist,
+        album: album,
+        trackNumber: `${globalTrackNum}/${totalTracks}`,
+        performerInfo: artist,
+        comment: { language: 'eng', text: 'Ripped with VinylRipper' }
+      };
+
+      if (albumYear) {
+        id3Tags.year = String(albumYear);
+        id3Tags.date = String(albumYear);
+      }
+      if (albumGenre) {
+        id3Tags.genre = albumGenre;
+      }
+
+      // Embed cover art as APIC frame
+      if (coverArtBuffer) {
+        id3Tags.image = {
+          mime: coverArtMimeType || 'image/jpeg',
+          type: { id: 3, name: 'front cover' },
+          description: 'Cover',
+          imageBuffer: coverArtBuffer
+        };
+      }
+
+      try {
+        const tagResult = NodeID3.write(id3Tags, newPath);
+        if (tagResult === true) {
+          const tagInfo = [`"${trackTitle}"`, `track ${globalTrackNum}/${totalTracks}`];
+          if (albumYear) tagInfo.push(`year: ${albumYear}`);
+          if (albumGenre) tagInfo.push(`genre: ${albumGenre}`);
+          if (coverArtBuffer) tagInfo.push('+ cover art');
+          processingLog.push({ type: 'success', message: `ID3 tags: ${tagInfo.join(', ')}` });
+        } else {
+          processingLog.push({ type: 'warning', message: `ID3 tag write returned unexpected result for track ${globalTrackNum}` });
+        }
+      } catch (tagError) {
+        logger.warn({ error: tagError.message, track: globalTrackNum }, 'Failed to write ID3 tags');
+        processingLog.push({ type: 'warning', message: `Failed to write ID3 tags for track ${globalTrackNum}: ${tagError.message}` });
       }
 
       // Extract waveform data for first and last 10 seconds

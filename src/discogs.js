@@ -135,12 +135,37 @@ export async function searchDiscogsAlbum(artist, album) {
       }
     }
 
+    // Extract cover art URL (prefer primary image, fall back to secondary)
+    let coverArtUrl = null;
+    if (releaseData.images && releaseData.images.length > 0) {
+      const primary = releaseData.images.find(img => img.type === 'primary');
+      coverArtUrl = primary ? primary.uri : releaseData.images[0].uri;
+    }
+    // Fallback: search result thumbnail
+    if (!coverArtUrl && bestResult.cover_image) {
+      coverArtUrl = bestResult.cover_image;
+    }
+
+    // Extract genres and styles
+    const genres = releaseData.genres || [];
+    const styles = releaseData.styles || [];
+
+    if (coverArtUrl) {
+      log.push({ type: 'success', message: `Found cover art on Discogs` });
+    }
+    if (genres.length > 0) {
+      log.push({ type: 'info', message: `Genre: ${genres.join(', ')}${styles.length > 0 ? ` / ${styles.join(', ')}` : ''}` });
+    }
+
     return {
       release: {
         id: bestResult.id,
         title: releaseData.title,
         artist: releaseData.artists?.[0]?.name || artist,
-        year: releaseData.year
+        year: releaseData.year,
+        genres,
+        styles,
+        coverArtUrl
       },
       sides,
       allTracks: sideLetters.flatMap(s => sides[s]),

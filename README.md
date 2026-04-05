@@ -14,6 +14,8 @@ A Node.js application for converting vinyl album recordings into individual trac
 - Automatic track naming based on official track listings
 - Length-based track matching with confidence scoring
 - **EBU R128 loudness normalization** — all tracks normalized to −14 LUFS (Spotify/Apple Music standard)
+- **Album cover art** — fetched from Cover Art Archive / Discogs, embedded as APIC in ID3 tags, saved as `cover.jpg`
+- **Full ID3 tagging** — title, artist, album, track number, year, genre, and embedded cover art
 - **Detailed processing log** in the browser (album lookup, silence detection, track matching)
 - **Waveform visualization** showing first/last 10 seconds of each track
 - **Configurable output folder** — set default in config, editable per-rip in the UI
@@ -64,9 +66,11 @@ Then open your browser to `http://localhost:3000`
 5. Expected track counts from Discogs guide the detection sensitivity
 6. Tracks are matched against the official listing by position and duration
 7. Each track is **loudness-normalized** to −14 LUFS (EBU R128) for consistent volume
-8. Optionally change the **output folder** (defaults to `output/`, configurable in config and UI)
-9. Output is saved to `<outputDir>/<Artist> - <Album>/`
-10. The browser shows a **processing log** with full details and **waveform previews** per track
+8. **Cover art** is fetched (Cover Art Archive → Discogs fallback) and saved + embedded
+9. Each track gets **full ID3 tags** (title, artist, album, track#, year, genre, cover art)
+10. Optionally change the **output folder** (defaults to `output/`, configurable in config and UI)
+11. Output is saved to `<outputDir>/<Artist> - <Album>/`
+12. The browser shows a **processing log** with full details and **waveform previews** per track
 
 ## Filename Convention
 
