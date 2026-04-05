@@ -10,6 +10,29 @@ async function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+/**
+ * Normalize special characters (umlauts, accents, etc.) to ASCII equivalents.
+ * Used as fallback when API searches fail with special characters.
+ */
+function normalizeToAscii(text) {
+  const replacements = {
+    'ä': 'a', 'ö': 'o', 'ü': 'u', 'ß': 'ss',
+    'Ä': 'A', 'Ö': 'O', 'Ü': 'U',
+    'é': 'e', 'è': 'e', 'ê': 'e', 'ë': 'e',
+    'á': 'a', 'à': 'a', 'â': 'a', 'å': 'a',
+    'í': 'i', 'ì': 'i', 'î': 'i', 'ï': 'i',
+    'ó': 'o', 'ò': 'o', 'ô': 'o', 'õ': 'o',
+    'ú': 'u', 'ù': 'u', 'û': 'u',
+    'ñ': 'n', 'ç': 'c', 'æ': 'ae', 'œ': 'oe'
+  };
+
+  let normalized = text;
+  for (const [special, ascii] of Object.entries(replacements)) {
+    normalized = normalized.replace(new RegExp(special, 'g'), ascii);
+  }
+  return normalized;
+}
+
 export async function searchAlbum(artist, album) {
   const log = [];
   try {
@@ -36,60 +59,95 @@ export async function searchAlbum(artist, album) {
     const data = await response.json();
 
     if (!data.releases || data.releases.length === 0) {
+      // Try fallback with normalized ASCII characters (handles umlauts, accents, etc.)
+      const normalizedArtist = normalizeToAscii(artist);
+      const normalizedAlbum = normalizeToAscii(album);
+
+      if (normalizedArtist !== artist || normalizedAlbum !== album) {
+        logger.info({ artist, normalizedArtist, album, normalizedAlbum }, 'Retrying with ASCII-normalized names');
+        log.push({ type: 'info', message: `No results found — retrying with normalized names: artist="${normalizedArtist}", album="${normalizedAlbum}"` });
+
+        await sleep(1000);
+        const normalizedQuery = `artist:"${normalizedArtist}" AND release:"${normalizedAlbum}"`;
+        const normalizedUrl = `${MUSICBRAINZ_API}/release?query=${encodeURIComponent(normalizedQuery)}&fmt=json&limit=10`;
+
+        const fallbackResponse = await fetch(normalizedUrl, {
+          headers: {
+            'User-Agent': USER_AGENT,
+            'Accept': 'application/json'
+          }
+        });
+
+        if (fallbackResponse.ok) {
+          const fallbackData = await fallbackResponse.json();
+          if (fallbackData.releases && fallbackData.releases.length > 0) {
+            log.push({ type: 'success', message: `Found ${fallbackData.releases.length} result(s) using normalized names` });
+            // Continue with fallback data instead of returning empty
+            return processSearchResults(fallbackData, artist, album, log);
+          }
+        }
+      }
+
       logger.warn({ artist, album }, 'No releases found');
       log.push({ type: 'warning', message: 'No releases found on MusicBrainz for this artist/album combination' });
       return { release: null, log };
     }
 
-    // Log all candidates found
-    log.push({ type: 'info', message: `Found ${data.releases.length} release candidate(s) on MusicBrainz` });
-    for (let i = 0; i < Math.min(data.releases.length, 10); i++) {
-      const r = data.releases[i];
-      const score = r.score || 'N/A';
-      const artistName = r['artist-credit']?.[0]?.name || 'Unknown';
-      const format = r.media?.[0]?.format || 'Unknown format';
-      const mediaCount = r.media?.length || 0;
-      log.push({
-        type: 'info',
-        message: `  ${i + 1}. "${r.title}" by ${artistName} (score: ${score}, format: ${format}, media: ${mediaCount}, id: ${r.id})`
-      });
-    }
-
-    // Prefer vinyl releases over CD releases
-    const vinylRelease = data.releases.find(r => {
-      if (!r.media) return false;
-      return r.media.some(m => VINYL_FORMATS.some(vf => m.format && m.format.toLowerCase().includes(vf.toLowerCase())));
-    });
-
-    let release;
-    if (vinylRelease) {
-      release = vinylRelease;
-      const format = release.media?.[0]?.format || 'Vinyl';
-      log.push({ type: 'success', message: `Selected vinyl release: "${release.title}" (format: ${format}, id: ${release.id})` });
-    } else {
-      release = data.releases[0];
-      const format = release.media?.[0]?.format || 'Unknown';
-      log.push({ type: 'info', message: `No vinyl release found, using: "${release.title}" (format: ${format}, id: ${release.id})` });
-    }
-
-    logger.info({ releaseId: release.id, title: release.title }, 'Found release');
-
-    return {
-      release: {
-        id: release.id,
-        title: release.title,
-        artist: release['artist-credit']?.[0]?.name || artist,
-        date: release.date || null,
-        year: release.date ? release.date.substring(0, 4) : null,
-        releaseGroupId: release['release-group']?.id || null
-      },
-      log
-    };
+    return processSearchResults(data, artist, album, log);
   } catch (error) {
     logger.error({ error: error.message }, 'Failed to search album');
     log.push({ type: 'error', message: `MusicBrainz search failed: ${error.message}` });
     throw Object.assign(error, { log });
   }
+}
+
+function processSearchResults(data, artist, album, log) {
+
+function processSearchResults(data, artist, album, log) {
+  // Log all candidates found
+  log.push({ type: 'info', message: `Found ${data.releases.length} release candidate(s) on MusicBrainz` });
+  for (let i = 0; i < Math.min(data.releases.length, 10); i++) {
+    const r = data.releases[i];
+    const score = r.score || 'N/A';
+    const artistName = r['artist-credit']?.[0]?.name || 'Unknown';
+    const format = r.media?.[0]?.format || 'Unknown format';
+    const mediaCount = r.media?.length || 0;
+    log.push({
+      type: 'info',
+      message: `  ${i + 1}. "${r.title}" by ${artistName} (score: ${score}, format: ${format}, media: ${mediaCount}, id: ${r.id})`
+    });
+  }
+
+  // Prefer vinyl releases over CD releases
+  const vinylRelease = data.releases.find(r => {
+    if (!r.media) return false;
+    return r.media.some(m => VINYL_FORMATS.some(vf => m.format && m.format.toLowerCase().includes(vf.toLowerCase())));
+  });
+
+  let release;
+  if (vinylRelease) {
+    release = vinylRelease;
+    const format = release.media?.[0]?.format || 'Vinyl';
+    log.push({ type: 'success', message: `Selected vinyl release: "${release.title}" (format: ${format}, id: ${release.id})` });
+  } else {
+    release = data.releases[0];
+    const format = release.media?.[0]?.format || 'Unknown';
+    log.push({ type: 'info', message: `No vinyl release found, using: "${release.title}" (format: ${format}, id: ${release.id})` });
+  }
+
+  logger.info({ releaseId: release.id, title: release.title }, 'Found release');
+
+  return {
+    release: {
+      id: release.id,
+      title: release.title,
+      artist: release['artist-credit']?.[0]?.name || artist,
+      date: release.date || null,
+      year: release.date ? release.date.substring(0, 4) : null,
+      releaseGroupId: release['release-group']?.id || null
+    },
+    log
+  };
 }
 
 export async function getTrackListing(releaseId) {
