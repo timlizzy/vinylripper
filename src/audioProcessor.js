@@ -636,7 +636,7 @@ export async function processAlbumSide(filePath, outputDir, expectedInfo = null)
 
   // Calculate durations (last track ends at run-out or file end)
   // Subtract a small buffer to avoid including the start of the next track
-  const trackGapBuffer = 0.3; // seconds to trim from end to avoid next track's intro
+  const trackGapBuffer = 0.5; // seconds to trim from end to avoid next track's intro
   for (let i = 0; i < splits.length; i++) {
     if (i < splits.length - 1) {
       splits[i].duration = splits[i + 1].start - splits[i].start - trackGapBuffer;
