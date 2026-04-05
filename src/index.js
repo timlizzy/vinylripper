@@ -54,6 +54,32 @@ app.get('/api/config', (req, res) => {
   });
 });
 
+// Directory browser endpoint - lists subdirectories for a given path
+app.get('/api/browse-dirs', async (req, res) => {
+  try {
+    const requestedPath = req.query.path || path.resolve(config.outputDir);
+    const resolvedPath = path.resolve(requestedPath);
+
+    // Read directory contents
+    const entries = await fs.readdir(resolvedPath, { withFileTypes: true });
+    const dirs = entries
+      .filter(e => e.isDirectory() && !e.name.startsWith('.'))
+      .map(e => e.name)
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+
+    res.json({
+      current: resolvedPath,
+      parent: path.dirname(resolvedPath),
+      separator: path.sep,
+      directories: dirs
+    });
+  } catch (error) {
+    res.status(400).json({
+      error: `Cannot read directory: ${error.message}`
+    });
+  }
+});
+
 // Main ripping endpoint
 app.post('/api/rip', upload.fields([
   { name: 'sideA', maxCount: 1 },

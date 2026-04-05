@@ -351,6 +351,143 @@
       0% { background-color: #e8f0fe; border-color: #667eea; }
       100% { background-color: transparent; }
     }
+
+    /* Directory Browser Modal */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.5);
+      z-index: 1000;
+      justify-content: center;
+      align-items: center;
+    }
+    .modal-overlay.show {
+      display: flex;
+    }
+    .modal {
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+      width: 90%;
+      max-width: 550px;
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 20px;
+      border-bottom: 1px solid #e0e0e0;
+      background: #f8f9fa;
+    }
+    .modal-header h3 {
+      margin: 0;
+      font-size: 1.1em;
+      color: #333;
+    }
+    .modal-close {
+      background: none;
+      border: none;
+      font-size: 1.5em;
+      cursor: pointer;
+      color: #666;
+      padding: 0;
+      width: auto;
+      line-height: 1;
+    }
+    .modal-close:hover { color: #333; }
+    .modal-path {
+      padding: 10px 20px;
+      font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+      font-size: 0.82em;
+      color: #667eea;
+      background: #f0f2ff;
+      border-bottom: 1px solid #e0e0e0;
+      word-break: break-all;
+    }
+    .modal-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0;
+      min-height: 200px;
+      max-height: 400px;
+    }
+    .dir-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 20px;
+      cursor: pointer;
+      border-bottom: 1px solid #f0f0f0;
+      font-size: 0.95em;
+      color: #333;
+      transition: background 0.15s;
+    }
+    .dir-item:hover {
+      background: #f0f2ff;
+    }
+    .dir-item.dir-parent {
+      font-weight: 600;
+      color: #667eea;
+      background: #fafafa;
+    }
+    .dir-item-icon {
+      font-size: 1.2em;
+      flex-shrink: 0;
+    }
+    .dir-item-name {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .dir-empty {
+      padding: 30px 20px;
+      text-align: center;
+      color: #999;
+      font-style: italic;
+    }
+    .dir-error {
+      padding: 16px 20px;
+      color: #dc3545;
+      background: #fff5f5;
+      font-size: 0.9em;
+    }
+    .modal-footer {
+      padding: 12px 20px;
+      border-top: 1px solid #e0e0e0;
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      background: #f8f9fa;
+    }
+    .modal-footer button {
+      width: auto;
+      padding: 8px 20px;
+      font-size: 0.95em;
+      border-radius: 6px;
+    }
+    .btn-cancel {
+      background: #e0e0e0;
+      color: #444;
+    }
+    .btn-cancel:hover { background: #d0d0d0; }
+    .btn-select {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+    .dir-loading {
+      padding: 30px 20px;
+      text-align: center;
+      color: #888;
+    }
   </style>
 </head>
 <body>
@@ -370,8 +507,14 @@
       </div>
 
       <div class="form-group">
-        <label for="outputDir">📂 Output Folder</label>
-        <input type="text" id="outputDir" name="outputDir" placeholder="Loading default...">
+        <label>📂 Output Folder</label>
+        <input type="hidden" id="outputDir" name="outputDir">
+        <div class="file-upload">
+          <label id="outputDirPicker" style="cursor: pointer;">
+            <span>📂 Choose output folder…</span>
+          </label>
+          <div class="file-name" id="outputDir-name">Loading default...</div>
+        </div>
         <div style="font-size: 0.8em; color: #888; margin-top: 4px;">Album subfolder will be created automatically inside this directory</div>
       </div>
 
@@ -431,6 +574,24 @@
     </div>
   </div>
 
+  <!-- Directory Browser Modal -->
+  <div class="modal-overlay" id="dirModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>📂 Choose Output Folder</h3>
+        <button class="modal-close" id="dirModalClose" type="button">&times;</button>
+      </div>
+      <div class="modal-path" id="dirModalPath">/</div>
+      <div class="modal-body" id="dirModalBody">
+        <div class="dir-loading">Loading…</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-cancel" id="dirModalCancel" type="button">Cancel</button>
+        <button class="btn-select" id="dirModalSelect" type="button">Select This Folder</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     const form = document.getElementById('ripForm');
     const status = document.getElementById('status');
@@ -450,21 +611,7 @@
       logToggleLabel.textContent = isCollapsed ? '▼ Show' : '▲ Hide';
     });
 
-    // Load default output directory from server config
-    (async function loadConfig() {
-      try {
-        const resp = await fetch('/api/config');
-        const cfg = await resp.json();
-        const outputDirInput = document.getElementById('outputDir');
-        if (cfg.outputDir && !outputDirInput.value.trim()) {
-          outputDirInput.value = cfg.outputDir;
-          outputDirInput.placeholder = cfg.outputDir;
-        }
-      } catch (e) {
-        // silently fall back to placeholder
-        document.getElementById('outputDir').placeholder = 'output';
-      }
-    })();
+    // Config loading is handled by the directory browser section below
 
     // Parse artist and album from filename like "Artist - Album - Side A.mp3"
     function parseFilename(filename) {
@@ -716,6 +863,111 @@
           // ignore parse errors
         }
       });
+    }
+
+    // ─── Directory Browser ──────────────────────────────────────────
+    const dirModal = document.getElementById('dirModal');
+    const dirModalPath = document.getElementById('dirModalPath');
+    const dirModalBody = document.getElementById('dirModalBody');
+    const dirModalClose = document.getElementById('dirModalClose');
+    const dirModalCancel = document.getElementById('dirModalCancel');
+    const dirModalSelect = document.getElementById('dirModalSelect');
+    const outputDirPicker = document.getElementById('outputDirPicker');
+    const outputDirInput = document.getElementById('outputDir');
+    const outputDirName = document.getElementById('outputDir-name');
+
+    let currentBrowsePath = '';
+
+    // Update the display when config loads
+    const origLoadConfig = (async function() {
+      try {
+        const resp = await fetch('/api/config');
+        const cfg = await resp.json();
+        if (cfg.outputDir && !outputDirInput.value.trim()) {
+          outputDirInput.value = cfg.outputDir;
+          currentBrowsePath = cfg.outputDir;
+          outputDirName.textContent = cfg.outputDir;
+          outputDirName.classList.add('file-selected');
+        }
+      } catch (e) {
+        outputDirName.textContent = 'output (default)';
+      }
+    })();
+
+    outputDirPicker.addEventListener('click', (e) => {
+      e.preventDefault();
+      openDirBrowser(outputDirInput.value || currentBrowsePath || '/');
+    });
+
+    dirModalClose.addEventListener('click', closeDirModal);
+    dirModalCancel.addEventListener('click', closeDirModal);
+    dirModal.addEventListener('click', (e) => {
+      if (e.target === dirModal) closeDirModal();
+    });
+
+    dirModalSelect.addEventListener('click', () => {
+      if (currentBrowsePath) {
+        outputDirInput.value = currentBrowsePath;
+        outputDirName.textContent = currentBrowsePath;
+        outputDirName.classList.add('file-selected');
+      }
+      closeDirModal();
+    });
+
+    function closeDirModal() {
+      dirModal.classList.remove('show');
+    }
+
+    async function openDirBrowser(startPath) {
+      dirModal.classList.add('show');
+      await browseTo(startPath);
+    }
+
+    async function browseTo(dirPath) {
+      dirModalBody.innerHTML = '<div class="dir-loading">Loading…</div>';
+      dirModalPath.textContent = dirPath || '/';
+
+      try {
+        const resp = await fetch(`/api/browse-dirs?path=${encodeURIComponent(dirPath)}`);
+        const data = await resp.json();
+
+        if (data.error) {
+          dirModalBody.innerHTML = `<div class="dir-error">⚠️ ${escapeHtml(data.error)}</div>`;
+          return;
+        }
+
+        currentBrowsePath = data.current;
+        dirModalPath.textContent = data.current;
+
+        dirModalBody.innerHTML = '';
+
+        // Parent directory entry
+        if (data.parent && data.parent !== data.current) {
+          const parentEl = document.createElement('div');
+          parentEl.className = 'dir-item dir-parent';
+          parentEl.innerHTML = `<span class="dir-item-icon">⬆️</span><span class="dir-item-name">.. (parent folder)</span>`;
+          parentEl.addEventListener('click', () => browseTo(data.parent));
+          dirModalBody.appendChild(parentEl);
+        }
+
+        if (data.directories.length === 0) {
+          const emptyEl = document.createElement('div');
+          emptyEl.className = 'dir-empty';
+          emptyEl.textContent = 'No subdirectories';
+          dirModalBody.appendChild(emptyEl);
+        } else {
+          for (const name of data.directories) {
+            const el = document.createElement('div');
+            el.className = 'dir-item';
+            el.innerHTML = `<span class="dir-item-icon">📁</span><span class="dir-item-name">${escapeHtml(name)}</span>`;
+            const fullPath = data.current + data.separator + name;
+            el.addEventListener('click', () => browseTo(fullPath));
+            dirModalBody.appendChild(el);
+          }
+        }
+      } catch (error) {
+        dirModalBody.innerHTML = `<div class="dir-error">⚠️ Failed to browse: ${escapeHtml(error.message)}</div>`;
+      }
     }
   </script>
 </body>
