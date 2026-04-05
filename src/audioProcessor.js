@@ -268,9 +268,6 @@ export async function splitAudioFile(filePath, splits, outputDir) {
       // High-pass filter to reduce vinyl rumble and low-frequency noise
       filters.push('highpass=f=20');
 
-      // Remove vinyl crackling/pops using adeclick
-      filters.push('adeclick=t=0.002:w=50');
-
       // Aggressive silence removal from start and end
       // Uses a lower threshold and requires real audio content to start
       filters.push('silenceremove=start_periods=1:start_threshold=-30dB:start_duration=0.05:stop_periods=-1:stop_threshold=-35dB:stop_duration=0.4');
