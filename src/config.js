@@ -26,6 +26,17 @@ export default {
     }
   },
 
+  // Loudness normalization (EBU R128)
+  normalization: {
+    enabled: true,
+    // Target integrated loudness in LUFS (Spotify/Apple Music/YouTube use -14)
+    targetLoudness: -14,
+    // True peak ceiling in dBTP (prevents clipping on DACs)
+    truePeak: -1.0,
+    // Loudness range target (0 = don't adjust dynamic range)
+    loudnessRange: 0
+  },
+
   // Track matching settings
   matching: {
     // Maximum difference in seconds for track length matching

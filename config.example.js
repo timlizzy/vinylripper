@@ -47,6 +47,29 @@ export default {
     }
   },
 
+  // Loudness normalization (EBU R128)
+  // Ensures all tracks have consistent volume
+  normalization: {
+    // Enable/disable normalization
+    enabled: true,
+
+    // Target integrated loudness in LUFS
+    // -14: Spotify, Apple Music, YouTube (recommended)
+    // -16: EBU broadcast standard
+    // -11: Louder (for portable listening)
+    targetLoudness: -14,
+
+    // True peak ceiling in dBTP (prevents digital clipping)
+    // -1.0: Default (safe for all DACs and codecs)
+    // -2.0: Extra headroom (for lossy re-encoding)
+    truePeak: -1.0,
+
+    // Loudness range target in LU (0 = preserve original dynamics)
+    // 0: Don't adjust dynamic range (recommended for music)
+    // 7-9: Compress dynamics slightly (podcast-style)
+    loudnessRange: 0
+  },
+
   // Track matching settings
   matching: {
     // Maximum difference in seconds for considering tracks as matching

@@ -296,6 +296,96 @@ export async function splitAudioFile(filePath, splits, outputDir) {
 }
 
 /**
+ * Normalize audio loudness using EBU R128 two-pass loudnorm.
+ * Pass 1: Analyze integrated loudness, true peak, and loudness range.
+ * Pass 2: Apply normalization with measured values for precise results.
+ * 
+ * @param {string} filePath - Path to the audio file to normalize (in-place)
+ * @param {object} options - Normalization options
+ * @param {number} options.targetLoudness - Target integrated loudness in LUFS (e.g., -14)
+ * @param {number} options.truePeak - True peak ceiling in dBTP (e.g., -1.0)
+ * @param {number} options.loudnessRange - Target LRA (0 = don't adjust)
+ * @returns {Promise<{inputLoudness: number, outputLoudness: number, log: Array}>}
+ */
+export async function normalizeAudio(filePath, options = {}) {
+  const targetI = options.targetLoudness ?? -14;
+  const targetTP = options.truePeak ?? -1.0;
+  const targetLRA = options.loudnessRange ?? 0;
+  const log = [];
+
+  // Pass 1: Measure loudness
+  const measureCmd = `ffmpeg -i "${filePath}" -af "loudnorm=I=${targetI}:TP=${targetTP}:LRA=${targetLRA || 11}:print_format=json" -f null - 2>&1`;
+
+  const { stdout: measureOutput } = await execAsync(measureCmd, { maxBuffer: 1024 * 1024 * 10 });
+
+  // Extract the JSON block from loudnorm output
+  const jsonMatch = measureOutput.match(/\{[\s\S]*?input_i[\s\S]*?\}/);
+  if (!jsonMatch) {
+    logger.warn('Loudness measurement failed — skipping normalization');
+    log.push({ type: 'warning', message: `  Loudness measurement failed — skipping normalization` });
+    return { inputLoudness: null, outputLoudness: null, log };
+  }
+
+  let measured;
+  try {
+    measured = JSON.parse(jsonMatch[0]);
+  } catch (e) {
+    logger.warn({ error: e.message }, 'Failed to parse loudnorm JSON');
+    log.push({ type: 'warning', message: `  Failed to parse loudness data — skipping normalization` });
+    return { inputLoudness: null, outputLoudness: null, log };
+  }
+
+  const inputI = parseFloat(measured.input_i);
+  const inputTP = parseFloat(measured.input_tp);
+  const inputLRA = parseFloat(measured.input_lra);
+  const inputThresh = parseFloat(measured.input_thresh);
+  const targetOffset = parseFloat(measured.target_offset);
+
+  log.push({
+    type: 'info',
+    message: `  Measured: ${inputI.toFixed(1)} LUFS (peak: ${inputTP.toFixed(1)} dBTP, range: ${inputLRA.toFixed(1)} LU)`
+  });
+
+  // Check if normalization is even needed (within 0.5 LUFS of target)
+  if (Math.abs(inputI - targetI) < 0.5) {
+    log.push({
+      type: 'success',
+      message: `  Already at target loudness (${inputI.toFixed(1)} LUFS ≈ ${targetI} LUFS) — no adjustment needed`
+    });
+    return { inputLoudness: inputI, outputLoudness: inputI, log };
+  }
+
+  // Pass 2: Apply normalization with measured values for precision
+  const tempPath = filePath.replace(/\.mp3$/, '.norm.mp3');
+  const lraParam = targetLRA > 0 ? `:LRA=${targetLRA}` : `:LRA=${inputLRA.toFixed(1)}`;
+  const normFilter = `loudnorm=I=${targetI}:TP=${targetTP}${lraParam}:measured_I=${measured.input_i}:measured_TP=${measured.input_tp}:measured_LRA=${measured.input_lra}:measured_thresh=${measured.input_thresh}:offset=${measured.target_offset}:linear=true`;
+
+  const normalizeCmd = `ffmpeg -i "${filePath}" -af "${normFilter}" -ar 44100 -ab 320k "${tempPath}" -y 2>&1`;
+
+  try {
+    await execAsync(normalizeCmd, { maxBuffer: 1024 * 1024 * 10 });
+
+    // Replace original with normalized version
+    await fs.unlink(filePath);
+    await fs.rename(tempPath, filePath);
+
+    const adjustment = targetI - inputI;
+    log.push({
+      type: 'success',
+      message: `  Normalized: ${inputI.toFixed(1)} → ${targetI} LUFS (${adjustment > 0 ? '+' : ''}${adjustment.toFixed(1)} dB)`
+    });
+
+    return { inputLoudness: inputI, outputLoudness: targetI, log };
+  } catch (error) {
+    // Clean up temp file on failure
+    try { await fs.unlink(tempPath); } catch (_) {}
+    logger.warn({ error: error.message }, 'Normalization failed');
+    log.push({ type: 'warning', message: `  Normalization failed: ${error.message}` });
+    return { inputLoudness: inputI, outputLoudness: null, log };
+  }
+}
+
+/**
  * Process an album side. If expectedTrackCount is provided (from API lookup),
  * use it to guide silence detection sensitivity and filter results.
  * 

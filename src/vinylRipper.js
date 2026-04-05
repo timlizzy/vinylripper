@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { processAlbumSide, extractWaveform, getAudioDuration } from './audioProcessor.js';
+import { processAlbumSide, extractWaveform, getAudioDuration, normalizeAudio } from './audioProcessor.js';
+import config from './config.js';
 import { getAlbumMetadata } from './musicbrainz.js';
 import { searchDiscogsAlbum } from './discogs.js';
 import { matchTracks, generateTrackName } from './trackMatcher.js';
@@ -295,7 +296,19 @@ export async function ripVinylAlbum(sides, artist, album, baseOutputDir = 'outpu
     await fs.mkdir(outputDir, { recursive: true });
 
     const results = [];
+
+    // ─── STEP 4a: Save and normalize output files ─────────────────────
     processingLog.push({ type: 'heading', message: 'Output' });
+
+    // Normalize loudness if enabled
+    const normConfig = config.normalization || {};
+    const normEnabled = normConfig.enabled !== false;
+    if (normEnabled) {
+      processingLog.push({
+        type: 'info',
+        message: `Loudness normalization: EBU R128, target ${normConfig.targetLoudness || -14} LUFS, peak ceiling ${normConfig.truePeak || -1.0} dBTP`
+      });
+    }
 
     // Calculate global track number across all sides
     let globalTrackNum = 1;
@@ -305,6 +318,19 @@ export async function ripVinylAlbum(sides, artist, album, baseOutputDir = 'outpu
       const newPath = path.join(outputDir, newName);
 
       await fs.rename(match.detectedTrack.path, newPath);
+
+      // Normalize loudness (in-place, before waveform extraction so waveforms reflect final audio)
+      if (normEnabled) {
+        processingLog.push({ type: 'info', message: `Normalizing track ${globalTrackNum}: "${match.officialTrack?.title || 'Unknown Track'}"` });
+        const normResult = await normalizeAudio(newPath, {
+          targetLoudness: normConfig.targetLoudness || -14,
+          truePeak: normConfig.truePeak || -1.0,
+          loudnessRange: normConfig.loudnessRange || 0
+        });
+        if (normResult.log) {
+          processingLog.push(...normResult.log);
+        }
+      }
 
       // Extract waveform data for first and last 10 seconds
       const trackDuration = match.detectedTrack.duration || await getAudioDuration(newPath);
