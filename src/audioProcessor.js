@@ -278,8 +278,9 @@ export async function splitAudioFile(filePath, splits, outputDir) {
       // High-pass filter to reduce vinyl rumble
       filters.push('highpass=f=20');
 
-      // NOW trim silence from start (after the cut is made)
-      filters.push('silenceremove=start_periods=1:start_threshold=-30dB:start_duration=0.05');
+      // Trim silence from both start AND end (after the cut is made)
+      // Now safe to do because the cut already happened
+      filters.push('silenceremove=start_periods=1:start_threshold=-30dB:start_duration=0.05:stop_periods=-1:stop_threshold=-40dB:stop_duration=0.3');
 
       const command = ffmpeg(filePath)
         .audioCodec('libmp3lame')
