@@ -263,19 +263,23 @@ export async function splitAudioFile(filePath, splits, outputDir) {
     const outputPath = path.join(outputDir, `${basename}_track_${String(i + 1).padStart(2, '0')}.mp3`);
 
     await new Promise((resolve, reject) => {
+      const filters = [];
+
+      // High-pass filter to reduce vinyl rumble and low-frequency noise
+      filters.push('highpass=f=20');
+
+      // Remove vinyl crackling/pops using adeclick
+      filters.push('adeclick=t=0.002:w=50');
+
+      // Aggressive silence removal from start and end
+      // Uses a lower threshold and requires real audio content to start
+      filters.push('silenceremove=start_periods=1:start_threshold=-30dB:start_duration=0.05:stop_periods=-1:stop_threshold=-35dB:stop_duration=0.4');
+
       const command = ffmpeg(filePath)
         .seekInput(split.start)
         .audioCodec('libmp3lame')
         .audioBitrate('320k')
-        // Trim silence from start and end of each track
-        // More aggressive settings to catch vinyl noise/crackling
-        // start_periods=1: trim one silence period from start
-        // start_threshold=-35dB: consider anything below -35dB as silence (catches most crackling)
-        // start_duration=0.1: minimum 0.1s of "silence" to trigger removal
-        // stop_periods=-1: trim all silence from end
-        .audioFilters([
-          'silenceremove=start_periods=1:start_threshold=-35dB:start_duration=0.1:stop_periods=-1:stop_threshold=-35dB:stop_duration=0.3'
-        ]);
+        .audioFilters(filters);
 
       if (split.duration) {
         command.duration(split.duration);
