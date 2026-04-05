@@ -268,9 +268,10 @@ export async function splitAudioFile(filePath, splits, outputDir) {
       // High-pass filter to reduce vinyl rumble and low-frequency noise
       filters.push('highpass=f=20');
 
-      // Aggressive silence removal from start and end
-      // Uses a lower threshold and requires real audio content to start
-      filters.push('silenceremove=start_periods=1:start_threshold=-30dB:start_duration=0.05:stop_periods=-1:stop_threshold=-35dB:stop_duration=0.4');
+      // Silence removal:
+      // - Aggressive at start: trim low-level crackling/noise before music starts
+      // - Conservative at end: only trim genuine silence, stop at first period of silence
+      filters.push('silenceremove=start_periods=1:start_threshold=-30dB:start_duration=0.05:stop_periods=1:stop_threshold=-50dB:stop_duration=0.5');
 
       const command = ffmpeg(filePath)
         .seekInput(split.start)
