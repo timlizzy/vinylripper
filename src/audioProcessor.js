@@ -266,7 +266,14 @@ export async function splitAudioFile(filePath, splits, outputDir) {
       const command = ffmpeg(filePath)
         .seekInput(split.start)
         .audioCodec('libmp3lame')
-        .audioBitrate('320k');
+        .audioBitrate('320k')
+        // Trim silence from start and end of each track
+        // silenceremove: start_periods=1 removes silence from beginning
+        // start_threshold=-50dB catches quiet noise/crackling
+        // stop_periods=-1 removes silence from end
+        .audioFilters([
+          'silenceremove=start_periods=1:start_threshold=-50dB:start_silence=0.1:stop_periods=-1:stop_threshold=-50dB:stop_silence=0.3'
+        ]);
 
       if (split.duration) {
         command.duration(split.duration);

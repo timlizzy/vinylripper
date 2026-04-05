@@ -12,6 +12,9 @@ async function sleep(ms) {
  * Used as fallback when API searches fail with special characters.
  */
 function normalizeToAscii(text) {
+  // First normalize Unicode to composed form (NFC) to handle combining diacriticals
+  const normalized = text.normalize('NFC');
+
   const replacements = {
     'ä': 'a', 'ö': 'o', 'ü': 'u', 'ß': 'ss',
     'Ä': 'A', 'Ö': 'O', 'Ü': 'U',
@@ -23,11 +26,11 @@ function normalizeToAscii(text) {
     'ñ': 'n', 'ç': 'c', 'æ': 'ae', 'œ': 'oe'
   };
 
-  let normalized = text;
+  let result = normalized;
   for (const [special, ascii] of Object.entries(replacements)) {
-    normalized = normalized.replace(new RegExp(special, 'g'), ascii);
+    result = result.replace(new RegExp(special, 'g'), ascii);
   }
-  return normalized;
+  return result;
 }
 
 /**
@@ -60,6 +63,15 @@ export async function searchDiscogsAlbum(artist, album) {
     }
 
     const data = await response.json();
+
+    logger.info({
+      hasResults: !!data.results,
+      resultsLength: data.results?.length
+    }, 'Discogs API response');
+    log.push({
+      type: 'info',
+      message: `Discogs API returned: ${data.results?.length || 0} results`
+    });
 
     if (!data.results || data.results.length === 0) {
       // Try fallback with normalized ASCII characters (handles umlauts, accents, etc.)
