@@ -268,12 +268,13 @@ export async function splitAudioFile(filePath, splits, outputDir) {
         .audioCodec('libmp3lame')
         .audioBitrate('320k')
         // Trim silence from start and end of each track
-        // silenceremove: start_periods=1 removes silence from beginning
-        // start_threshold=-40dB catches quiet noise/crackling (more aggressive)
-        // start_duration=0.2s requires at least 0.2s of silence to trim
-        // stop_periods=-1 removes silence from end
+        // More aggressive settings to catch vinyl noise/crackling
+        // start_periods=1: trim one silence period from start
+        // start_threshold=-35dB: consider anything below -35dB as silence (catches most crackling)
+        // start_duration=0.1: minimum 0.1s of "silence" to trigger removal
+        // stop_periods=-1: trim all silence from end
         .audioFilters([
-          'silenceremove=start_periods=1:start_threshold=-40dB:start_duration=0.2:stop_periods=-1:stop_threshold=-40dB:stop_duration=0.5'
+          'silenceremove=start_periods=1:start_threshold=-35dB:start_duration=0.1:stop_periods=-1:stop_threshold=-35dB:stop_duration=0.3'
         ]);
 
       if (split.duration) {
