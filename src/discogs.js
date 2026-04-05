@@ -104,8 +104,6 @@ export async function searchDiscogsAlbum(artist, album) {
 }
 
 async function processDiscogsResults(data, artist, album, log) {
-
-async function processDiscogsResults(data, artist, album, log) {
   log.push({ type: 'info', message: `Found ${data.results.length} Discogs result(s)` });
 
   // Find best match — prefer exact title matches

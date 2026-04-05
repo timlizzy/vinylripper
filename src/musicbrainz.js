@@ -102,8 +102,6 @@ export async function searchAlbum(artist, album) {
 }
 
 function processSearchResults(data, artist, album, log) {
-
-function processSearchResults(data, artist, album, log) {
   // Log all candidates found
   log.push({ type: 'info', message: `Found ${data.releases.length} release candidate(s) on MusicBrainz` });
   for (let i = 0; i < Math.min(data.releases.length, 10); i++) {
