@@ -265,22 +265,26 @@ export async function splitAudioFile(filePath, splits, outputDir) {
     await new Promise((resolve, reject) => {
       const filters = [];
 
-      // High-pass filter to reduce vinyl rumble and low-frequency noise
+      // Calculate exact end time for this track
+      const endTime = split.start + split.duration;
+
+      // Use atrim to cut precisely, then clean up
+      // atrim: cut from start to end time (precise boundaries)
+      filters.push(`atrim=start=${split.start}:end=${endTime}`);
+
+      // Reset timestamps after trim
+      filters.push('asetpts=PTS-STARTPTS');
+
+      // High-pass filter to reduce vinyl rumble
       filters.push('highpass=f=20');
 
-      // Aggressive silence removal ONLY from start
-      // Don't touch the end - let the duration cut handle that precisely
+      // NOW trim silence from start (after the cut is made)
       filters.push('silenceremove=start_periods=1:start_threshold=-30dB:start_duration=0.05');
 
       const command = ffmpeg(filePath)
-        .seekInput(split.start)
         .audioCodec('libmp3lame')
         .audioBitrate('320k')
         .audioFilters(filters);
-
-      if (split.duration) {
-        command.duration(split.duration);
-      }
 
       command
         .on('end', () => {
